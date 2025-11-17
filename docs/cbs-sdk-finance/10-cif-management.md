@@ -609,15 +609,17 @@ const dormancyRule: LifecycleRule = {
 
 ## KYC Levels
 
+> **Quy định theo**: [Thông tư 40/2024/TT-NHNN](https://thuvienphapluat.vn/van-ban/Tien-te-Ngan-hang/Thong-tu-40-2024-TT-NHNN-huong-dan-hoat-dong-cung-ung-dich-vu-trung-gian-thanh-toan-615328.aspx) của Ngân hàng Nhà nước về hoạt động cung ứng dịch vụ trung gian thanh toán
+
 ### Định nghĩa KYC Levels
 
 ```typescript
 enum KYCLevel {
   LEVEL_1 = 1,  // User Account - Chỉ đăng ký SĐT + OTP (CHƯA TẠO CIF)
-  LEVEL_2 = 2,  // eKYC Verified - Xác thực CCCD + Facial + Bộ Công an
-  LEVEL_3 = 3,  // Sanction List Verified - Đã kiểm tra danh sách trừng phạt
-  LEVEL_4 = 4,  // Manual Review Completed - Đã kiểm tra thủ công high risk
-  LEVEL_5 = 5   // Enhanced Verification - Xác thực địa chỉ/thu nhập (Merchant)
+  LEVEL_2 = 2,  // eKYC cơ bản - Xác thực danh tính điện tử
+  LEVEL_3 = 3,  // eKYC nâng cao - Xác thực sinh trắc học bổ sung
+  LEVEL_4 = 4,  // Xác thực đầy đủ - Không giới hạn giao dịch
+  LEVEL_5 = 5   // Enhanced Merchant - Xác thực địa chỉ/thu nhập (Merchant)
 }
 
 interface KYCLevelLimits {
@@ -640,7 +642,7 @@ const KYC_LIMITS = {
     description: 'User Account - Đăng ký tài khoản người dùng',
     limits: {
       maxBalance: 0,             // Không có ví
-      dailyTransaction: 0,
+    dailyTransaction: 0,
       monthlyTransaction: 0
     },
     features: [
@@ -659,81 +661,99 @@ const KYC_LIMITS = {
   
   [KYCLevel.LEVEL_2]: {
     cifCreated: true,            // ✅ TẠO CIF KHI ĐẠT LEVEL 2
-    description: 'eKYC Verified - Xác minh danh tính điện tử',
+    description: 'eKYC cơ bản - Xác thực danh tính điện tử (TT 40/2024/TT-NHNN)',
     limits: {
-      maxBalance: 10_000_000,    // 10 triệu - Theo quy định ví điện tử
-      dailyTransaction: 10_000_000,  // 10 triệu
-      monthlyTransaction: 20_000_000 // 20 triệu
+      maxBalance: Infinity,      // Không giới hạn số dư
+      dailyTransaction: Infinity, // Không giới hạn giao dịch/ngày
+      monthlyTransaction: 100_000_000 // ⚖️ 100 triệu VNĐ/tháng (Thông tư 40/2024)
     },
     features: [
       'create_wallet',           // Tạo ví
-      'bank_linking',            // ✅ Liên kết tài khoản ngân hàng
+      'bank_linking',            // ✅ Liên kết tài khoản ngân hàng (bắt buộc)
       'receive_money',           // Nhận tiền
       'transfer_money',          // Chuyển tiền
       'payment',                 // Thanh toán
-      'top_up'                   // Nạp tiền
+      'top_up',                  // Nạp tiền
+      'withdrawal'               // Rút tiền
     ],
     requirements: [
-      'Scan CCCD/CMND',
-      'Facial Recognition',
-      'Xác minh với Bộ Công an',
-      'Liên kết tài khoản ngân hàng'
+      'Giấy tờ tùy thân hợp lệ: CCCD/CMND/Hộ chiếu',
+      'Xác minh danh tính qua phương thức điện tử (eKYC)',
+      'Liên kết tài khoản ngân hàng (bắt buộc)',
+      'Số điện thoại đăng ký'
     ],
     applicableTo: [
+      'Khách hàng cá nhân sử dụng ví điện tử',
       'Người tiêu dùng thông thường',
       'Winlife members'
-    ]
+    ],
+    legalBasis: 'Điều 26 Thông tư 40/2024/TT-NHNN'
   },
   
   [KYCLevel.LEVEL_3]: {
     cifCreated: true,
-    description: 'Sanction List Verified - Đã kiểm tra danh sách trừng phạt',
+    description: 'eKYC nâng cao - Xác thực sinh trắc học bổ sung (TT 40/2024/TT-NHNN)',
     limits: {
-      maxBalance: 100_000_000,   // 100 triệu - Theo quy định ví điện tử
-      dailyTransaction: 100_000_000, // 100 triệu
-      monthlyTransaction: 1_000_000_000 // 1 tỷ
+      maxBalance: Infinity,      // Không giới hạn số dư
+      dailyTransaction: Infinity, // Không giới hạn giao dịch/ngày
+      monthlyTransaction: 500_000_000 // ⚖️ 500 triệu VNĐ/tháng (Thông tư 40/2024)
     },
     features: [
       'all_level_2_features',
-      'withdrawal',              // Rút tiền
+      'high_value_transactions', // Giao dịch giá trị cao
       'international_payment',   // Thanh toán quốc tế
+      'investment_services',     // Dịch vụ đầu tư
       'credit_access'            // Truy cập tín dụng
     ],
     requirements: [
       'Tất cả yêu cầu Level 2',
-      'AML Screening - Kiểm tra Sanction Lists',
-      'PEP Check',
-      'Watchlist Check'
+      'Xác thực sinh trắc học (Facial Recognition, vân tay)',
+      'Xác minh danh tính nâng cao',
+      'Cung cấp thông tin bổ sung theo yêu cầu',
+      'AML Screening - Kiểm tra danh sách trừng phạt',
+      'Từ 01/01/2026: Bắt buộc xác thực sinh trắc học'
     ],
     applicableTo: [
-      'Khách hàng đã qua AML screening',
-      'Người dùng giao dịch cao'
-    ]
+      'Khách hàng giao dịch giá trị cao',
+      'Người dùng cần hạn mức lớn hơn 100 triệu/tháng',
+      'Khách hàng đã qua AML screening'
+    ],
+    legalBasis: 'Điều 26, 27 Thông tư 40/2024/TT-NHNN'
   },
   
   [KYCLevel.LEVEL_4]: {
     cifCreated: true,
-    description: 'Manual Review Completed - Đã kiểm tra thủ công high risk',
+    description: 'Xác thực đầy đủ - Không giới hạn giao dịch (TT 40/2024/TT-NHNN)',
     limits: {
-      maxBalance: 100_000_000,   // 100 triệu - Theo quy định ví điện tử
-      dailyTransaction: 100_000_000, // 100 triệu
-      monthlyTransaction: 1_000_000_000 // 1 tỷ
+      maxBalance: Infinity,      // Không giới hạn số dư
+      dailyTransaction: Infinity, // Không giới hạn giao dịch/ngày
+      monthlyTransaction: Infinity // ⚖️ KHÔNG GIỚI HẠN (Thông tư 40/2024)
+                                   // Tuân thủ quy định quản lý rủi ro
     },
     features: [
       'all_level_3_features',
-      'high_value_transactions', // Giao dịch giá trị cao
-      'business_transactions'    // Giao dịch kinh doanh
+      'unlimited_transactions',  // Không giới hạn giao dịch
+      'high_value_transactions', // Giao dịch giá trị rất cao
+      'business_transactions',   // Giao dịch kinh doanh
+      'institutional_services',  // Dịch vụ tổ chức
+      'bulk_payments'            // Thanh toán hàng loạt
     ],
     requirements: [
       'Tất cả yêu cầu Level 3',
+      'Xác thực danh tính đầy đủ theo quy định phòng chống rửa tiền',
+      'Cung cấp tất cả thông tin và tài liệu theo yêu cầu',
       'Manual review bởi Compliance Team',
-      'Manager approval cho HIGH risk cases',
-      'Có thể yêu cầu tài liệu bổ sung'
+      'Đánh giá và phê duyệt quản lý rủi ro',
+      'Có thể yêu cầu xác minh tại điểm giao dịch'
     ],
     applicableTo: [
-      'Khách hàng HIGH risk đã qua review',
-      'Khách hàng là PEP được chấp nhận'
-    ]
+      'Khách hàng có nhu cầu giao dịch không giới hạn',
+      'Doanh nghiệp, tổ chức',
+      'Khách hàng VIP, priority',
+      'Khách hàng đã qua review đầy đủ'
+    ],
+    legalBasis: 'Điều 26, 27 Thông tư 40/2024/TT-NHNN',
+    note: 'Không giới hạn nhưng phải tuân thủ quản lý rủi ro và phòng chống rửa tiền'
   },
   
   [KYCLevel.LEVEL_5]: {
@@ -776,15 +796,32 @@ const KYC_LIMITS = {
 
 ### So sánh KYC Levels
 
-| Level | CIF Created | Mô tả | Hạn mức số dư | Hạn mức GD/ngày | Đối tượng |
-|-------|-------------|-------|---------------|-----------------|-----------|
-| **1** | ❌ Chưa | User Account (SĐT + OTP) | 0 VND | 0 VND | Người dùng app |
-| **2** | ✅ Tạo CIF | eKYC + Bộ Công an + Bank linking | 10 triệu | 10 triệu | Consumer |
-| **3** | ✅ | Sanction List Verified | 100 triệu | 100 triệu | High-volume user |
-| **4** | ✅ | Manual Review (High risk) | 100 triệu | 100 triệu | Approved high-risk |
-| **5** | ✅ | Enhanced (Merchant) | Không giới hạn | > 100 triệu* | NPP, NBL, SME |
+> **Theo Thông tư 40/2024/TT-NHNN** - Ngân hàng Nhà nước Việt Nam
 
-*\* Hạn mức cụ thể do Risk Management quy định*
+| Level | CIF | Mô tả | Hạn mức/tháng | Yêu cầu chính | Cơ sở pháp lý |
+|-------|-----|-------|---------------|---------------|---------------|
+| **1** | ❌ | User Account | 0 VND | SĐT + OTP | Quy định nội bộ |
+| **2** | ✅ | eKYC cơ bản | **100 triệu** | CCCD/CMND + eKYC + Bank linking | TT 40/2024 Đ.26 |
+| **3** | ✅ | eKYC nâng cao | **500 triệu** | Sinh trắc học + AML | TT 40/2024 Đ.26,27 |
+| **4** | ✅ | Xác thực đầy đủ | **Không giới hạn*** | Xác thực đầy đủ + Quản lý rủi ro | TT 40/2024 Đ.26,27 |
+| **5** | ✅ | Enhanced Merchant | **Không giới hạn*** | Address/Work/Income + Business docs | Extension cho Merchant |
+
+**Ghi chú:**
+- *Level 1-4: Theo Thông tư 40/2024/TT-NHNN*
+- *Level 5: Extension của hệ thống cho merchant (NPP, NBL)*
+- *\*Không giới hạn nhưng tuân thủ quy định quản lý rủi ro và phòng chống rửa tiền*
+- **Từ 01/01/2026**: Bắt buộc xác thực sinh trắc học khi mở ví điện tử (Level 2+)
+
+### Ngoại lệ hạn mức (Theo TT 40/2024)
+
+Quy định hạn mức **KHÔNG** áp dụng đối với các giao dịch:
+- Thanh toán trực tuyến trên Cổng Dịch vụ công quốc gia
+- Thanh toán tiền điện, nước, viễn thông
+- Thanh toán phí, giá dịch vụ liên quan đến giao thông đường bộ
+- Thanh toán học phí, viện phí
+- Đóng bảo hiểm xã hội, bảo hiểm y tế
+- Chi trả nợ và lãi cho ngân hàng
+- Ví điện tử của merchant (đơn vị chấp nhận thanh toán)
 
 ## Hành trình Onboarding Khách hàng
 
@@ -814,49 +851,58 @@ flowchart TD
     STEP2_REASON -->|Data mismatch| REJECTED1[Từ chối eKYC]
     
     STEP2_VERIFY -->|Success| CREATE_CIF[✅ TẠO CIF<br/>Customer Information File]
-    CREATE_CIF --> BANK_LINK[Liên kết<br/>tài khoản ngân hàng]
-    BANK_LINK --> LEVEL2[✓ Level 2: eKYC Verified<br/>CIF Created<br/>Hạn mức: 10 triệu/ngày]
+    CREATE_CIF --> BANK_LINK[Liên kết<br/>tài khoản ngân hàng<br/>BẮT BUỘC]
+    BANK_LINK --> LEVEL2[✓ Level 2: eKYC cơ bản<br/>CIF Created<br/>⚖️ Hạn mức: 100 triệu/tháng<br/>TT 40/2024]
     
-    LEVEL2 --> STEP3[Bước 3: AML Screening<br/>Tự động]
+    LEVEL2 --> USER_NEED{Cần hạn mức<br/>cao hơn?}
+    USER_NEED -->|Không| CONSUMER_L2[Sử dụng với<br/>Level 2: 100M/tháng]
+    USER_NEED -->|Có| STEP3[Bước 3: eKYC nâng cao<br/>Xác thực sinh trắc học]
     
-    STEP3 --> STEP3_CHECK[Kiểm tra:<br/>- Sanction lists<br/>- PEP lists<br/>- Watchlists<br/>- Adverse media]
-    STEP3_CHECK --> STEP3_RESULT{Risk Score}
+    STEP3 --> STEP3_BIO[Xác thực:<br/>- Facial Recognition nâng cao<br/>- Vân tay (nếu có)<br/>- Liveness detection]
+    STEP3_BIO --> STEP3_AML[AML Screening:<br/>- Sanction lists<br/>- PEP lists<br/>- Watchlists]
+    STEP3_AML --> STEP3_RESULT{Risk Score}
     
-    STEP3_RESULT -->|LOW RISK<br/>Score < 25| LEVEL3[✓ Level 3: Sanction List Verified<br/>Hạn mức: 100 triệu/ngày]
+    STEP3_RESULT -->|LOW/MEDIUM RISK<br/>Score < 50| LEVEL3[✓ Level 3: eKYC nâng cao<br/>⚖️ Hạn mức: 500 triệu/tháng<br/>TT 40/2024]
     STEP3_RESULT -->|FOUND in<br/>Sanction List| REJECTED2[Block Account]
-    STEP3_RESULT -->|MEDIUM/HIGH RISK<br/>Score >= 25| STEP4[Bước 4: Manual Review]
+    STEP3_RESULT -->|HIGH RISK<br/>Score >= 50| STEP4[Bước 4: Manual Review]
     
     STEP4 --> STEP4_REVIEW[Compliance Team<br/>kiểm tra thủ công]
     STEP4_REVIEW --> STEP4_DECISION{Quyết định}
     
-    STEP4_DECISION -->|Approved| LEVEL4[✓ Level 4: Manual Review Passed<br/>Hạn mức: 100 triệu/ngày]
+    STEP4_DECISION -->|Approved| LEVEL4[✓ Level 4: Xác thực đầy đủ<br/>⚖️ Hạn mức: KHÔNG GIỚI HẠN<br/>TT 40/2024]
     STEP4_DECISION -->|Rejected| REJECTED3[Từ chối & Block]
     STEP4_DECISION -->|Need more info| STEP4_REQUEST[Yêu cầu<br/>bổ sung tài liệu]
     
     STEP4_REQUEST --> STEP4_UPLOAD[Customer upload<br/>thêm documents]
     STEP4_UPLOAD --> STEP4_REVIEW
     
-    LEVEL3 --> CONSUMER_USE[Sử dụng ví<br/>Consumer]
-    LEVEL4 --> CONSUMER_USE
+    CONSUMER_L2 --> CONSUMER_END[Kết thúc: Level 2]
+    LEVEL3 --> CONSUMER_L3[Sử dụng với<br/>Level 3: 500M/tháng]
+    CONSUMER_L3 --> CONSUMER_END2[Kết thúc: Level 3]
     
-    LEVEL4 --> MERCHANT_CHOICE{Merchant<br/>cần hạn mức cao?}
-    MERCHANT_CHOICE -->|Không| CONSUMER_USE
-    MERCHANT_CHOICE -->|Có| STEP5[Bước 5: Enhanced Verification]
+    LEVEL4 --> L4_CHOICE{Loại khách hàng?}
+    L4_CHOICE -->|Consumer/VIP| CONSUMER_L4[Sử dụng với<br/>Level 4: Không giới hạn]
+    L4_CHOICE -->|Merchant| STEP5[Bước 5: Enhanced Merchant]
     
     STEP5 --> STEP5_DOCS[Xác thực:<br/>- Địa chỉ liên hệ<br/>- Nơi làm việc<br/>- Nguồn thu nhập<br/>- Giấy phép KD]
     STEP5_DOCS --> STEP5_VERIFY{Xác minh<br/>thành công?}
     
     STEP5_VERIFY -->|Failed| STEP5_DOCS
-    STEP5_VERIFY -->|Success| LEVEL5[✓ Level 5: Enhanced Merchant<br/>Hạn mức: > 100 triệu*<br/>Risk Management quyết định]
+    STEP5_VERIFY -->|Success| LEVEL5[✓ Level 5: Enhanced Merchant<br/>⚖️ Hạn mức: KHÔNG GIỚI HẠN<br/>Extension - Quản lý rủi ro]
     
-    LEVEL5 --> MERCHANT_USE[Sử dụng dịch vụ<br/>Merchant: NPP, NBL]
+    LEVEL5 --> MERCHANT_L5[Merchant Services<br/>NPP, NBL, SME]
+    
+    CONSUMER_L4 --> END_L4[Kết thúc: Level 4]
+    MERCHANT_L5 --> END_L5[Kết thúc: Level 5]
     
     BROWSE --> END0[End]
     REJECTED1 --> END1[End]
     REJECTED2 --> END2[End]
     REJECTED3 --> END3[End]
-    CONSUMER_USE --> END4[End]
-    MERCHANT_USE --> END5[End]
+    CONSUMER_END --> END_NORMAL[End]
+    CONSUMER_END2 --> END_NORMAL
+    END_L4 --> END_NORMAL
+    END_L5 --> END_NORMAL
     
     style STEP1 fill:#e3f2fd
     style STEP2 fill:#e3f2fd
@@ -1144,15 +1190,17 @@ async function completeStep2AndCreateCIF(
 }
 ```
 
-**Chức năng Level 2:**
+**Chức năng Level 2 (Theo TT 40/2024/TT-NHNN):**
 - ✅ CIF đã được tạo
-- ✅ Có tài khoản ví
-- ✅ Liên kết tài khoản ngân hàng
+- ✅ Có tài khoản ví điện tử
+- ✅ Liên kết tài khoản ngân hàng (BẮT BUỘC)
 - ✅ Nạp tiền
 - ✅ Nhận tiền
 - ✅ Chuyển tiền
 - ✅ Thanh toán
-- 📊 Hạn mức: 10 triệu/ngày, 20 triệu/tháng
+- ✅ Rút tiền
+- ⚖️ **Hạn mức: 100 triệu VNĐ/tháng**
+- 📋 Cơ sở pháp lý: Thông tư 40/2024/TT-NHNN Điều 26
 
 #### Bước 3: AML Screening (Sanction List)
 
@@ -1476,12 +1524,25 @@ async function managerApproveReview(
 }
 ```
 
-**Chức năng Level 3 & 4:**
+**Chức năng Level 3 (eKYC nâng cao - TT 40/2024):**
+- ✅ Tất cả chức năng Level 2
+- ✅ Xác thực sinh trắc học nâng cao
 - ✅ Đã qua AML screening
-- ✅ Hạn mức: 100 triệu/ngày, 1 tỷ/tháng
-- ✅ Rút tiền
+- ✅ Giao dịch giá trị cao
 - ✅ Thanh toán quốc tế
-- ✅ Truy cập tín dụng
+- ✅ Truy cập tín dụng, đầu tư
+- ⚖️ **Hạn mức: 500 triệu VNĐ/tháng**
+- 📋 Cơ sở pháp lý: Thông tư 40/2024/TT-NHNN Điều 26, 27
+
+**Chức năng Level 4 (Xác thực đầy đủ - TT 40/2024):**
+- ✅ Tất cả chức năng Level 3
+- ✅ Xác thực danh tính đầy đủ
+- ✅ Đã qua manual review và quản lý rủi ro
+- ✅ Không giới hạn giao dịch
+- ✅ Dịch vụ VIP, Priority
+- ✅ Thanh toán hàng loạt
+- ⚖️ **Hạn mức: KHÔNG GIỚI HẠN** (tuân thủ quản lý rủi ro)
+- 📋 Cơ sở pháp lý: Thông tư 40/2024/TT-NHNN Điều 26, 27
 
 #### Bước 5: Enhanced Verification (Level 5) - Dành cho Merchant
 
@@ -1638,10 +1699,13 @@ stateDiagram-v2
         + Bank linking
     end note
     
-    Level2 --> AMLScreening: Automatic AML Screening
+    Level2 --> Level2Active: Consumer L2<br/>100M VND/month
+    Level2 --> Level3: Need higher limit<br/>eKYC advanced
     
-    AMLScreening --> Level3: LOW risk (Score < 25)<br/>Auto approved
-    AMLScreening --> ManualReview: MEDIUM/HIGH risk<br/>(Score >= 25)
+    Level3 --> AMLScreening: Automatic AML Screening
+    
+    AMLScreening --> Level3Active: LOW/MED risk<br/>Auto approved
+    AMLScreening --> ManualReview: HIGH risk<br/>(Score >= 50)
     AMLScreening --> Blocked: Found in sanction list
     
     ManualReview --> RequestDocs: Need more info
@@ -1650,21 +1714,42 @@ stateDiagram-v2
     ManualReview --> Level4: Approved by Compliance
     ManualReview --> Blocked: Rejected
     
-    Level3 --> ConsumerActive: Consumer usage<br/>100M VND/day limit
-    Level4 --> ConsumerActive: Consumer usage<br/>100M VND/day limit
-    Level4 --> Level5: Merchant needs high limit<br/>Enhanced verification
+    Level3Active --> ConsumerL3: Consumer L3<br/>500M VND/month
+    Level4 --> ConsumerL4: Consumer/VIP L4<br/>UNLIMITED
+    Level4 --> Level5: Merchant needs<br/>Enhanced verification
+    
+    note right of Level2Active
+        TT 40/2024/TT-NHNN
+        eKYC basic
+        100M VND/month
+    end note
+    
+    note right of Level3Active
+        TT 40/2024/TT-NHNN
+        eKYC advanced
+        500M VND/month
+    end note
+    
+    note right of Level4
+        TT 40/2024/TT-NHNN
+        Full verification
+        UNLIMITED
+    end note
     
     note right of Level5
+        Extension - Not in TT 40/2024
         Merchant: NPP, NBL
         Verify: Address/Work/Income
         + Business documents
-        Limit: > 100M (Risk approval)
+        UNLIMITED (Risk approval)
     end note
     
-    Level5 --> MerchantActive: Merchant usage<br/>High limits (Risk-approved)
+    Level5 --> MerchantActive: Merchant L5<br/>UNLIMITED
     
     BrowseOnly --> [*]
-    ConsumerActive --> [*]
+    Level2Active --> [*]
+    ConsumerL3 --> [*]
+    ConsumerL4 --> [*]
     MerchantActive --> [*]
     Blocked --> [*]
 ```
