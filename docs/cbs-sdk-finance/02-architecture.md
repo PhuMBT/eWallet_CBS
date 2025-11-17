@@ -13,85 +13,36 @@ SDK.Finance là giải pháp core banking được xây dựng theo kiến trúc
 
 ```mermaid
 graph TB
-    subgraph "Client Layer"
-        A[Mobile App]
-        B[Web Portal]
-        C[POS Terminal]
-        D[Third-party Apps]
+    subgraph CL["Client Layer"]
+        CL1[Mobile App<br/>Web Portal<br/>POS Terminal<br/>Third-party Apps]
     end
     
-    subgraph "API Gateway"
-        E[API Gateway / Load Balancer]
+    subgraph GW["API Gateway Layer"]
+        GW1[API Gateway<br/>Load Balancer<br/>Authentication<br/>Rate Limiting]
     end
     
-    subgraph "Application Layer - Domain Services"
-        F[Account Service]
-        G[Transaction Service]
-        H[Payment Service]
-        I[Credit Service]
-        I1[AML Service]
-        J1[Notification Service]
+    subgraph APP["Application Layer - Domain Services"]
+        APP1[Account Service<br/>Transaction Service<br/>Payment Service<br/>Credit Service<br/>AML Service<br/>Notification Service]
     end
     
-    subgraph "Core Banking Layer - Foundation Services"
-        K[Core Banking Engine]
-        K1[CIF Management<br/>Master Data]
-        L[Ledger System<br/>Master Data]
-        M[Risk Management]
+    subgraph CORE["Core Banking Layer - Foundation Services"]
+        CORE1[Core Banking Engine<br/>CIF Management Master Data<br/>Ledger System Master Data<br/>Risk Management]
     end
     
-    subgraph "Data Layer"
-        N[(Main Database)]
-        O[(Cache - Redis)]
-        P[(Message Queue)]
+    subgraph DATA["Data Layer"]
+        DATA1[Main Database<br/>Cache Redis<br/>Message Queue]
     end
     
-    subgraph "Integration Layer"
-        Q[Payment Gateway]
-        R[External Bank]
-        S[Card Network]
-        T[Bộ Công an API<br/>eKYC/AML]
+    subgraph INT["Integration Layer - External Systems"]
+        INT1[Payment Gateway<br/>External Banks<br/>Card Networks<br/>eKYC/AML Providers<br/>Napas]
     end
     
-    A --> E
-    B --> E
-    C --> E
-    D --> E
-    E --> F
-    E --> G
-    E --> H
-    E --> I
-    E --> I1
-    E --> J1
-    
-    F --> K
-    G --> K
-    H --> K
-    I --> K
-    I1 --> K
-    
-    F --> K1
-    G --> K1
-    H --> K1
-    I --> K1
-    
-    K --> K1
-    K --> L
-    K --> M
-    K --> N
-    K --> O
-    K --> P
-    
-    K1 --> N
-    K1 --> O
-    K1 --> I1
-    
-    I1 --> T
-    M --> I1
-    
-    H --> Q
-    H --> R
-    H --> S
+    CL -->|User Requests| GW
+    GW -->|Route & Authenticate| APP
+    APP -->|Business Logic| CORE
+    CORE -->|Store & Retrieve| DATA
+    APP -->|External Payments| INT
+    CORE -->|Compliance Check| APP
 ```
 
 ## Các lớp kiến trúc chính
