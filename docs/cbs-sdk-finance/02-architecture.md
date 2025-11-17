@@ -22,11 +22,11 @@ graph TB
     end
     
     subgraph APP["Application Layer - Domain Services"]
-        APP1[Account Service<br/>Transaction Service<br/>Payment Service<br/>Credit Service<br/>AML Service<br/>Notification Service]
+        APP1[Account Service<br/>Transaction Service<br/>Payment Service<br/>Credit Service<br/>AML Service<br/>Risk Management<br/>Notification Service]
     end
     
     subgraph CORE["Core Banking Layer - Foundation Services"]
-        CORE1[Core Banking Engine<br/>CIF Management Master Data<br/>Ledger System Master Data<br/>Risk Management]
+        CORE1[Core Banking Engine<br/>CIF Management Master Data<br/>Ledger System Master Data]
     end
     
     subgraph DATA["Data Layer"]
@@ -138,6 +138,49 @@ Lớp này bao gồm các ứng dụng và kênh tương tác với người dù
 4. ✅ Có thể scale độc lập theo nhu cầu screening
 5. ✅ Dễ dàng update khi quy định thay đổi
 
+#### Risk Management (Quản lý rủi ro)
+
+**Vai trò:** Service chuyên biệt cho risk assessment, fraud detection và monitoring
+
+**Chức năng chính:**
+- **Fraud Detection**: Phát hiện gian lận
+  - Transaction pattern analysis
+  - Anomaly detection
+  - Behavioral analysis
+  - Device fingerprinting
+- **Transaction Risk Scoring**: Đánh giá rủi ro giao dịch
+  - Real-time risk calculation
+  - Rule-based scoring
+  - ML-based risk models
+  - Velocity checks
+- **Limit Control & Monitoring**: Kiểm soát hạn mức
+  - Transaction limits (daily, monthly)
+  - Velocity limits
+  - Geographic restrictions
+  - Merchant category restrictions
+- **Suspicious Activity Monitoring**: Giám sát hoạt động đáng ngờ
+  - Alert generation
+  - Case management
+  - Investigation workflow
+  - Regulatory reporting
+- **AML/CFT Compliance**: Tuân thủ chống rửa tiền
+  - Transaction monitoring rules
+  - Threshold monitoring
+  - Pattern detection
+  - CTR/STR reporting
+
+**Integration:**
+- **Upstream**: Được gọi bởi Transaction Service, Payment Service, Credit Service
+- **Downstream**: Gọi CIF Management (customer data), AML Service (screening)
+- **Phụ thuộc**: Core Banking Engine, CIF Management, AML Service
+
+**Tại sao Risk Management ở Application Layer?**
+1. ✅ Business logic & rule-based processing
+2. ✅ Frequently changing rules and thresholds
+3. ✅ Integration-heavy (nhiều data sources)
+4. ✅ Có thể scale độc lập khi transaction volume tăng
+5. ✅ Separate concern từ master data management
+
 #### Notification Service (Dịch vụ thông báo)
 - Push notification
 - SMS/Email
@@ -201,7 +244,8 @@ Lớp này bao gồm các ứng dụng và kênh tương tác với người dù
 - Quản lý workflow
 - Business rule engine
 - Event sourcing
-- Orchestration giữa CIF, Ledger, Risk Management
+- Orchestration giữa CIF và Ledger
+- Cung cấp APIs cho Application Services
 
 #### Ledger System (Hệ thống sổ cái - Master Data)
 - Double-entry bookkeeping
@@ -209,13 +253,7 @@ Lớp này bao gồm các ứng dụng và kênh tương tác với người dù
 - GL (General Ledger) management
 - Account statement generation
 - **Master Data**: Chart of Accounts (COA)
-
-#### Risk Management (Quản lý rủi ro)
-- Fraud detection
-- AML (Anti-Money Laundering)
-- Transaction limit control
-- Suspicious activity monitoring
-- **Integration**: Sử dụng dữ liệu từ CIF Management
+- Transaction posting và reconciliation
 
 ### 5. Data Layer (Lớp dữ liệu)
 
@@ -595,8 +633,13 @@ Kiến trúc SDK.Finance được thiết kế theo nguyên tắc **Layered Arch
 - ✅ **AML Service**: Chuyên biệt cho screening & external integration
   - Kết nối Bộ Công an API (eKYC)
   - AML/sanction screening
-  - Risk assessment
+  - Customer risk assessment
   - Compliance reporting
+- ✅ **Risk Management**: Chuyên biệt cho fraud detection & monitoring
+  - Transaction risk scoring
+  - Fraud detection
+  - Limit control & monitoring
+  - Suspicious activity monitoring
 
 **2. Core Banking Layer (Foundation Services & Master Data)**
 - ✅ Quản lý Master Data (CIF, Ledger/COA)
