@@ -5,14 +5,32 @@ This folder contains reference materials and context documents for AI assistants
 ## 📁 Contents
 
 ### `regulations-context.md`
+**Focus**: KYC & Transaction Limits for eWallet
+
 Comprehensive regulatory context for eWallet KYC and transaction limits in Vietnam. This document provides:
-- Thông tư 40/2024/TT-NHNN complete reference
-- KYC level definitions and requirements
+- Thông tư 40/2024/TT-NHNN complete reference (Articles 26, 27, 28)
+- KYC level definitions and requirements (Level 1-5)
 - Transaction limits and exceptions
 - Compliance guidelines for AI assistants
 - Code examples and implementation guidance
 
 **When to use**: Any time you're working on KYC, CIF management, transaction limits, or compliance-related documentation.
+
+---
+
+### `vietnam-payment-regulations.md`
+**Focus**: Complete Payment Intermediary Legal Framework
+
+Comprehensive documentation of Vietnamese laws governing all payment intermediary services. This document provides:
+- Nghị định 52/2024/NĐ-CP (Cashless Payment Decree)
+- Thông tư 40/2024/TT-NHNN (Full circular, all chapters)
+- All 5 types of payment intermediary services
+- Licensing requirements and capital conditions
+- Administrative penalties and enforcement
+- Legal definitions and terminology
+- Timeline of regulatory changes
+
+**When to use**: When designing system architecture, understanding legal requirements for payment services, planning licensing strategy, or documenting legal compliance framework.
 
 ## 🎯 Purpose
 
