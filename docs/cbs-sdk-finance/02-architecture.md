@@ -24,18 +24,18 @@ graph TB
         E[API Gateway / Load Balancer]
     end
     
-    subgraph "Application Layer"
+    subgraph "Application Layer - Domain Services"
         F[Account Service]
         G[Transaction Service]
         H[Payment Service]
         I[Credit Service]
-        J[CIF Management Service]
-        K1[Notification Service]
+        J1[Notification Service]
     end
     
-    subgraph "Core Banking Layer"
+    subgraph "Core Banking Layer - Foundation Services"
         K[Core Banking Engine]
-        L[Ledger System]
+        K1[CIF Management<br/>Master Data]
+        L[Ledger System<br/>Master Data]
         M[Risk Management]
     end
     
@@ -49,6 +49,7 @@ graph TB
         Q[Payment Gateway]
         R[External Bank]
         S[Card Network]
+        T[Bộ Công an API<br/>eKYC/AML]
     end
     
     A --> E
@@ -59,22 +60,32 @@ graph TB
     E --> G
     E --> H
     E --> I
-    E --> J
-    E --> K1
+    E --> J1
+    
     F --> K
     G --> K
     H --> K
     I --> K
-    J --> K
+    
+    F --> K1
+    G --> K1
+    H --> K1
+    I --> K1
+    
+    K --> K1
     K --> L
     K --> M
     K --> N
     K --> O
     K --> P
+    
+    K1 --> N
+    K1 --> O
+    K1 --> T
+    
     H --> Q
     H --> R
     H --> S
-    J --> F
 ```
 
 ## Các lớp kiến trúc chính
@@ -99,50 +110,36 @@ Lớp này bao gồm các ứng dụng và kênh tương tác với người dù
   - API versioning
   - Logging & monitoring
 
-### 3. Application Layer (Lớp ứng dụng)
+### 3. Application Layer (Lớp ứng dụng - Domain Services)
 
-Bao gồm các microservices độc lập, mỗi service chịu tr책nhiệm một domain cụ thể:
+**Đặc điểm:** Layer này bao gồm các microservices xử lý các use case nghiệp vụ cụ thể. Các services này **CONSUME** dữ liệu từ Core Banking Layer và không sở hữu master data.
 
 #### Account Service (Dịch vụ tài khoản)
 - Tạo, cập nhật, đóng tài khoản
-- Quản lý thông tin khách hàng (KYC)
 - Phân loại tài khoản (retail, business, VIP)
 - Quản lý hạn mức giao dịch
+- **Phụ thuộc**: CIF Management (lấy thông tin khách hàng)
 
 #### Transaction Service (Dịch vụ giao dịch)
 - Xử lý giao dịch chuyển tiền
 - Lịch sử giao dịch
 - Reconciliation (đối soát)
 - Transaction monitoring
+- **Phụ thuộc**: CIF Management (verify customer), Ledger System
 
 #### Payment Service (Dịch vụ thanh toán)
 - Tích hợp payment gateway
 - Xử lý thanh toán QR code
 - Thanh toán hóa đơn
 - Nạp/rút tiền
+- **Phụ thuộc**: CIF Management (check KYC level), Ledger System
 
 #### Credit Service (Dịch vụ tín dụng)
 - Quản lý hạn mức tín dụng
 - Credit scoring
 - Quản lý khoản vay
 - Tính lãi và phí
-
-#### CIF Management Service (Dịch vụ quản lý thông tin khách hàng)
-- **Customer Onboarding**: Tiếp nhận và xác minh khách hàng mới
-- **KYC/KYB Verification**: Xác thực danh tính (5 cấp độ theo TT 40/2024/TT-NHNN)
-  - Level 1: User Account (không CIF)
-  - Level 2: eKYC cơ bản (tạo CIF, 100M/tháng)
-  - Level 3: eKYC nâng cao (500M/tháng)
-  - Level 4: Xác thực đầy đủ (không giới hạn)
-  - Level 5: Enhanced Merchant (NPP, NBL)
-- **Customer Profile Management**: Quản lý hồ sơ khách hàng toàn diện
-- **Relationship Management**: Quản lý quan hệ khách hàng (cá nhân, doanh nghiệp)
-- **Customer Segmentation**: Phân loại và phân khúc khách hàng
-- **Lifecycle Management**: Quản lý vòng đời khách hàng
-- **Document Management**: Quản lý tài liệu, giấy tờ khách hàng
-- **Customer 360° View**: Góc nhìn toàn diện về khách hàng
-- **AML Screening**: Kiểm tra danh sách trừng phạt, PEP, watchlist
-- **Compliance Management**: Đảm bảo tuân thủ quy định KYC/AML
+- **Phụ thuộc**: CIF Management (credit profile, risk rating)
 
 #### Notification Service (Dịch vụ thông báo)
 - Push notification
@@ -150,27 +147,75 @@ Bao gồm các microservices độc lập, mỗi service chịu tr책nhiệm m�
 - In-app notification
 - Transaction alerts
 
-### 4. Core Banking Layer (Lớp xử lý nghiệp vụ core)
+### 4. Core Banking Layer (Lớp xử lý nghiệp vụ core - Foundation Services)
 
-Đây là trái tim của hệ thống:
+**Đặc điểm:** Đây là trái tim của hệ thống, quản lý **MASTER DATA** và cung cấp foundation services cho tất cả Application Layer services. Layer này đảm bảo data consistency, business rules enforcement, và compliance.
+
+#### CIF Management (Customer Information File - Master Data)
+
+**📌 Vị trí:** Core Banking Layer (theo industry best practice: Temenos T24, Oracle FLEXCUBE, Finacle)
+
+**Vai trò:** Single Source of Truth về thông tin khách hàng
+
+**Chức năng chính:**
+
+**Master Data Management:**
+- **Customer CRUD**: Tạo, đọc, cập nhật, xóa thông tin khách hàng
+- **Customer Profile**: Quản lý hồ sơ khách hàng toàn diện
+- **Relationship Hierarchy**: Quản lý quan hệ khách hàng (cá nhân, doanh nghiệp, beneficial owners)
+- **Document Repository**: Lưu trữ và quản lý giấy tờ khách hàng
+
+**KYC/KYB & Compliance:**
+- **Customer Onboarding**: Tiếp nhận và xác minh khách hàng mới
+- **KYC/KYB Verification**: Xác thực danh tính (5 cấp độ theo TT 40/2024/TT-NHNN)
+  - Level 1: User Account (không CIF)
+  - Level 2: eKYC cơ bản (tạo CIF, 100M/tháng)
+  - Level 3: eKYC nâng cao (500M/tháng)
+  - Level 4: Xác thực đầy đủ (không giới hạn)
+  - Level 5: Enhanced Merchant (NPP, NBL)
+- **AML Screening**: Kiểm tra danh sách trừng phạt, PEP, watchlist
+- **Periodic Review**: Xem xét định kỳ theo quy định
+- **Risk Rating**: Xếp hạng rủi ro khách hàng
+
+**Lifecycle Management:**
+- **Active/Dormant**: Quản lý trạng thái hoạt động
+- **Reactivation**: Kích hoạt lại khách hàng
+- **Closure**: Đóng hồ sơ khách hàng
+- **Data Retention**: Lưu trữ theo quy định pháp luật
+
+**Customer 360° View:**
+- **Aggregated Data**: Tổng hợp dữ liệu từ tất cả sources
+- **Transaction History**: Lịch sử giao dịch
+- **Product Holdings**: Sản phẩm đang sử dụng
+- **Relationships**: Mối quan hệ với khách hàng khác
+
+**Tại sao CIF ở Core Banking Layer?**
+1. ✅ CIF là Master Data (giống Ledger System)
+2. ✅ Tất cả Application Services phụ thuộc vào CIF
+3. ✅ Single Source of Truth cần centralized control
+4. ✅ Compliance & Security cần tập trung quản lý
+5. ✅ Industry best practice (T24, FLEXCUBE, Finacle)
 
 #### Core Banking Engine
 - Xử lý logic nghiệp vụ cốt lõi
 - Quản lý workflow
 - Business rule engine
 - Event sourcing
+- Orchestration giữa CIF, Ledger, Risk Management
 
-#### Ledger System (Hệ thống sổ cái)
+#### Ledger System (Hệ thống sổ cái - Master Data)
 - Double-entry bookkeeping
 - Real-time balance calculation
 - GL (General Ledger) management
 - Account statement generation
+- **Master Data**: Chart of Accounts (COA)
 
 #### Risk Management (Quản lý rủi ro)
 - Fraud detection
 - AML (Anti-Money Laundering)
 - Transaction limit control
 - Suspicious activity monitoring
+- **Integration**: Sử dụng dữ liệu từ CIF Management
 
 ### 5. Data Layer (Lớp dữ liệu)
 
@@ -206,7 +251,10 @@ Kết nối với các hệ thống bên ngoài:
 - **Payment Gateway**: Napas, Visa, Mastercard
 - **External Banks**: Ngân hàng đối tác
 - **Card Networks**: Mạng lưới thẻ
-- **Government Systems**: Kết nối cơ quan nhà nước (nếu cần)
+- **Government Systems**: 
+  - **Bộ Công an API**: eKYC verification, national ID database
+  - **AML/Sanctions Lists**: Sanction screening, PEP lists, watchlists
+  - **Credit Bureaus**: Credit history (nếu cần)
 
 ## Luồng dữ liệu chính
 
@@ -262,55 +310,84 @@ sequenceDiagram
 
 ### Luồng Onboarding Khách hàng (Customer Onboarding với CIF)
 
+**📌 Lưu ý:** CIF Management nằm ở **Core Banking Layer**, Account Service gọi xuống Core Banking Layer để tạo CIF.
+
 ```mermaid
 sequenceDiagram
     participant U as User/Customer
     participant A as API Gateway
-    participant CIF as CIF Management
-    participant KYC as KYC/AML Service
+    participant ACC as Account Service<br/>(Application)
+    participant CORE as Core Banking Engine
+    participant CIF as CIF Management<br/>(Core Banking)
     participant GOV as Bộ Công an API
-    participant ACC as Account Service
     participant DB as Database
     participant N as Notification
     
     Note over U,N: Bước 1: Tạo User Account (Level 1)
     U->>A: Đăng ký với SĐT + OTP
-    A->>CIF: Create User Account
-    CIF->>DB: Save user (NO CIF yet)
-    DB-->>CIF: User created
-    CIF-->>U: Level 1 - Browse only
+    A->>ACC: Create user request
+    ACC->>CORE: Validate & create user
+    CORE->>DB: Save user (NO CIF yet)
+    DB-->>CORE: User created
+    CORE-->>ACC: User ID
+    ACC->>N: Send welcome message
+    N-->>U: Level 1 - Browse only
     
     Note over U,N: Bước 2: eKYC & Tạo CIF (Level 2)
     U->>A: Upload CCCD + Selfie
-    A->>CIF: Request eKYC verification
-    CIF->>KYC: Verify ID + Face
-    KYC->>GOV: Verify with National DB
-    GOV-->>KYC: Verified OK
-    KYC->>KYC: AML Screening (Basic)
-    KYC-->>CIF: Verification success
-    
-    CIF->>CIF: CREATE CIF
+    A->>ACC: KYC verification request
+    ACC->>CORE: Request CIF creation
+    CORE->>CIF: Create CIF with eKYC
+    CIF->>GOV: Verify ID with National DB
+    GOV-->>CIF: Verified OK
+    CIF->>CIF: AML Screening (Basic)
+    CIF->>CIF: CREATE CIF Record
     CIF->>DB: Save CIF + Customer Info
-    CIF->>ACC: Create wallet account
-    ACC-->>CIF: Account created
-    
-    CIF->>N: Notify KYC approved
+    DB-->>CIF: CIF created
+    CIF-->>CORE: CIF ID + Level 2
+    CORE->>ACC: Create wallet account
+    ACC->>DB: Create account linked to CIF
+    ACC->>N: Notify KYC approved
     N-->>U: Level 2 - 100M/month
-    CIF-->>A: CIF created successfully
-    A-->>U: Onboarding complete
+    ACC-->>A: Onboarding complete
+    A-->>U: Success
     
     Note over U,N: Bước 3: Nâng cấp Level (Optional)
-    U->>CIF: Request higher limit
-    CIF->>KYC: Enhanced verification
-    KYC->>KYC: Biometric + AML check
-    alt Low Risk
-        KYC-->>CIF: Level 3 - 500M/month
-    else High Risk
-        KYC->>KYC: Manual review
-        KYC-->>CIF: Level 4 - Unlimited
+    U->>A: Request higher limit
+    A->>ACC: Upgrade KYC level
+    ACC->>CORE: Request level upgrade
+    CORE->>CIF: Upgrade KYC verification
+    CIF->>CIF: Enhanced biometric check
+    CIF->>CIF: Advanced AML screening
+    alt Low Risk Customer
+        CIF-->>CORE: Level 3 - 500M/month
+    else High Risk - Need Review
+        CIF->>CIF: Manual review process
+        CIF-->>CORE: Level 4 - Unlimited
     end
-    CIF->>N: Notify limit upgrade
+    CORE->>ACC: Update account limits
+    ACC->>N: Notify upgrade
     N-->>U: Level upgraded
+```
+
+**Giải thích Call Flow:**
+
+```
+User Request
+  ↓
+API Gateway (Authentication/Authorization)
+  ↓
+Account Service (Application Layer)
+  ↓                                    ← Application Layer không sở hữu CIF data
+Core Banking Engine                    
+  ↓                                    ← Core Banking Layer quản lý master data
+CIF Management (Core Banking Layer)    
+  ↓
+Database
+
+✅ CORRECT: Hierarchical dependency (App → Core → Data)
+✅ CIF Management provides master data to ALL application services
+✅ Single Source of Truth at Core Banking Layer
 ```
 
 ## Bảo mật
@@ -480,21 +557,63 @@ graph LR
 
 ## Kết luận
 
-Kiến trúc SDK.Finance được thiết kế để:
+Kiến trúc SDK.Finance được thiết kế theo nguyên tắc **Layered Architecture** với sự phân tách rõ ràng giữa các tầng:
 
-- ✅ Đáp ứng yêu cầu về hiệu năng và độ tin cậy cao
-- ✅ Dễ dàng mở rộng và bảo trì
-- ✅ Bảo mật và tuân thủ các quy định
-- ✅ Tích hợp linh hoạt với các hệ thống khác
-- ✅ Hỗ trợ disaster recovery và high availability
-- ✅ **Quản lý thông tin khách hàng (CIF) tuân thủ đầy đủ**:
+### Nguyên tắc Kiến trúc
+
+**1. Application Layer (Domain Services)**
+- ✅ Xử lý use cases nghiệp vụ cụ thể
+- ✅ CONSUME data từ Core Banking Layer
+- ✅ Stateless và dễ scale
+- ✅ Không sở hữu master data
+
+**2. Core Banking Layer (Foundation Services & Master Data)**
+- ✅ Quản lý Master Data (CIF, Ledger/COA)
+- ✅ PROVIDE foundation services cho Application Layer
+- ✅ Single Source of Truth
+- ✅ Centralized compliance & security control
+
+**3. CIF Management - Architectural Decision**
+- 🏆 **CIF được đặt ở Core Banking Layer** (không phải Application Layer)
+- 📌 **Lý do**:
+  1. CIF là Master Data (giống Ledger System)
+  2. Tất cả Application Services phụ thuộc vào CIF
+  3. Industry best practice (Temenos T24, Oracle FLEXCUBE, Finacle)
+  4. Compliance & Security cần centralized control
+  5. Loại bỏ circular dependencies
+- 📄 **Chi tiết phân tích**: `reference-docs/cif-architecture-analysis.md`
+
+### Lợi ích Kiến trúc
+
+- ✅ **Proper Layered Architecture**: Dependencies flow downward (App → Core)
+- ✅ **No Circular Dependencies**: Application services không phụ thuộc lẫn nhau
+- ✅ **Single Source of Truth**: CIF và Ledger là authoritative sources
+- ✅ **Hiệu năng cao**: Xử lý hàng nghìn giao dịch đồng thời
+- ✅ **Tính sẵn sàng**: Uptime 99.9%
+- ✅ **Bảo mật**: Tuân thủ các tiêu chuẩn bảo mật tài chính quốc tế
+- ✅ **Khả năng mở rộng**: Scale horizontal và vertical
+- ✅ **Dễ dàng bảo trì**: Clear separation of concerns
+- ✅ **Tích hợp linh hoạt**: Dễ dàng tích hợp với các hệ thống khác
+- ✅ **Disaster Recovery & High Availability**: Comprehensive backup and failover
+
+### Regulatory Compliance
+
+- ✅ **CIF Management tuân thủ đầy đủ**:
   - Thông tư 40/2024/TT-NHNN về KYC/AML
   - Nghị định 52/2024/NĐ-CP về thanh toán không dùng tiền mặt
   - Luật An ninh mạng về bảo vệ dữ liệu cá nhân
   - 5 cấp độ KYC linh hoạt phù hợp với nhu cầu business
-- ✅ **Customer-centric approach**:
-  - Customer 360° view
-  - Lifecycle management
-  - Seamless onboarding experience
-  - Regulatory compliance by design
+
+### Customer-Centric Approach
+
+- ✅ **Customer 360° View**: Góc nhìn toàn diện về khách hàng
+- ✅ **Lifecycle Management**: Quản lý vòng đời khách hàng
+- ✅ **Seamless Onboarding**: Trải nghiệm onboarding mượt mà
+- ✅ **Regulatory Compliance by Design**: Tuân thủ được thiết kế từ đầu
+
+### Tài liệu Tham khảo
+
+- 📄 **Phân tích Kiến trúc CIF**: `reference-docs/cif-architecture-analysis.md` (774 lines)
+- 📄 **Quy định KYC/AML**: `reference-docs/regulations-context.md`
+- 📄 **Quy định Thanh toán**: `reference-docs/vietnam-payment-regulations.md`
 
