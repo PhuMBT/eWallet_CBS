@@ -1,8 +1,611 @@
-# X. KYC/KYB - Xác minh Danh tính Khách hàng
+# X. CIF Management - Quản lý Hồ sơ Khách hàng
 
 ## Tổng quan
 
-Module KYC (Know Your Customer) và KYB (Know Your Business) đảm bảo tuân thủ quy định chống rửa tiền (AML) và xác minh danh tính khách hàng trước khi cung cấp dịch vụ tài chính.
+CIF (Customer Information File) Management là phân hệ quản lý toàn diện thông tin khách hàng trong Core Banking System. Module này quản lý vòng đời khách hàng từ onboarding, xác minh danh tính (KYC/KYB), duy trì thông tin, phân khúc khách hàng, đến quản lý mối quan hệ và chu kỳ khách hàng.
+
+### Phạm vi CIF Management
+
+CIF Management bao gồm các chức năng chính:
+
+1. **Customer Onboarding** - Tiếp nhận khách hàng mới
+2. **KYC/KYB** - Xác minh danh tính và tuân thủ AML
+3. **Customer Profile Management** - Quản lý hồ sơ khách hàng
+4. **Customer Relationship Management** - Quản lý mối quan hệ khách hàng
+5. **Customer Segmentation** - Phân khúc khách hàng
+6. **Customer Lifecycle Management** - Quản lý chu kỳ sống khách hàng
+7. **Customer Analytics** - Phân tích hành vi khách hàng
+
+## Sơ đồ Tổng quan CIF Management
+
+```mermaid
+graph TB
+    subgraph "Customer Acquisition"
+        A1[Lead Management<br/>Quản lý tiềm năng]
+        A2[Onboarding<br/>Tiếp nhận KH]
+        A3[KYC/KYB Verification<br/>Xác minh danh tính]
+        A4[Account Opening<br/>Mở tài khoản]
+    end
+    
+    subgraph "Customer Information"
+        B1[Personal Data<br/>Dữ liệu cá nhân]
+        B2[Contact Info<br/>Thông tin liên hệ]
+        B3[Documents<br/>Giấy tờ]
+        B4[Financial Profile<br/>Hồ sơ tài chính]
+        B5[Risk Profile<br/>Hồ sơ rủi ro]
+    end
+    
+    subgraph "Customer Relationship"
+        C1[Relationship Hierarchy<br/>Cấu trúc quan hệ]
+        C2[Beneficial Owners<br/>Chủ sở hữu thực]
+        C3[Authorized Users<br/>Người được ủy quyền]
+        C4[Related Parties<br/>Bên liên quan]
+    end
+    
+    subgraph "Customer Segmentation"
+        D1[Demographic<br/>Nhân khẩu học]
+        D2[Behavioral<br/>Hành vi]
+        D3[Transactional<br/>Giao dịch]
+        D4[Value-based<br/>Giá trị]
+    end
+    
+    subgraph "Customer Lifecycle"
+        E1[Active<br/>Đang hoạt động]
+        E2[Dormant<br/>Ngủ]
+        E3[Reactivation<br/>Kích hoạt lại]
+        E4[Closure<br/>Đóng]
+    end
+    
+    subgraph "Compliance & Risk"
+        F1[KYC Levels<br/>5 cấp độ]
+        F2[AML Screening<br/>Chống rửa tiền]
+        F3[Periodic Review<br/>Xem xét định kỳ]
+        F4[Risk Rating<br/>Xếp hạng rủi ro]
+    end
+    
+    subgraph "Customer Analytics"
+        G1[Customer 360° View<br/>Góc nhìn toàn diện]
+        G2[Behavior Analysis<br/>Phân tích hành vi]
+        G3[Churn Prediction<br/>Dự đoán rời bỏ]
+        G4[CLV Analysis<br/>Giá trị vòng đời]
+    end
+    
+    A1 --> A2
+    A2 --> A3
+    A3 --> A4
+    
+    A4 --> B1
+    B1 --> B2
+    B2 --> B3
+    B3 --> B4
+    B4 --> B5
+    
+    B1 --> C1
+    C1 --> C2
+    C1 --> C3
+    C1 --> C4
+    
+    B1 --> D1
+    B4 --> D2
+    B4 --> D3
+    D2 --> D4
+    D3 --> D4
+    
+    A4 --> E1
+    E1 --> E2
+    E2 --> E3
+    E2 --> E4
+    
+    A3 --> F1
+    F1 --> F2
+    F2 --> F3
+    F3 --> F4
+    
+    B1 --> G1
+    B4 --> G1
+    D1 --> G2
+    G2 --> G3
+    G1 --> G4
+    
+    style A2 fill:#e3f2fd
+    style A3 fill:#e3f2fd
+    style B1 fill:#fff4e6
+    style C1 fill:#f3e5f5
+    style D4 fill:#e8f5e9
+    style E1 fill:#fff3e0
+    style F2 fill:#ffebee
+    style G1 fill:#fce4ec
+```
+
+## 1. Customer Profile Management
+
+### CIF Structure
+
+```typescript
+interface CustomerInformationFile {
+  cifId: string;                    // Unique CIF identifier
+  cifNumber: string;                // Business CIF number
+  
+  // Customer Type
+  customerType: 'INDIVIDUAL' | 'BUSINESS';
+  customerCategory: 'RETAIL' | 'CORPORATE' | 'SME' | 'INSTITUTIONAL';
+  
+  // Personal Information (for Individual)
+  personalInfo?: {
+    prefix: string;                 // Mr, Mrs, Ms, Dr
+    firstName: string;
+    middleName?: string;
+    lastName: string;
+    fullName: string;
+    nativeLanguageName?: string;
+    dateOfBirth: string;
+    placeOfBirth: string;
+    gender: 'MALE' | 'FEMALE' | 'OTHER';
+    nationality: string;
+    countryOfResidence: string;
+    maritalStatus: 'SINGLE' | 'MARRIED' | 'DIVORCED' | 'WIDOWED';
+    education: string;
+    occupation: string;
+    employer?: string;
+  };
+  
+  // Business Information (for Business)
+  businessInfo?: {
+    legalName: string;
+    tradingName: string;
+    registrationNumber: string;
+    taxId: string;
+    businessType: 'SOLE_PROPRIETOR' | 'PARTNERSHIP' | 'COMPANY' | 'CORPORATION';
+    industryCategory: string;
+    incorporationDate: string;
+    numberOfEmployees: number;
+    annualRevenue: number;
+    website?: string;
+  };
+  
+  // Contact Information
+  contactInfo: {
+    primaryPhone: string;
+    secondaryPhone?: string;
+    primaryEmail: string;
+    secondaryEmail?: string;
+    preferredLanguage: string;
+    preferredChannel: 'EMAIL' | 'SMS' | 'PHONE' | 'APP';
+  };
+  
+  // Addresses
+  addresses: Array<{
+    type: 'PERMANENT' | 'MAILING' | 'BUSINESS' | 'BILLING';
+    street: string;
+    ward: string;
+    district: string;
+    city: string;
+    state: string;
+    country: string;
+    postalCode: string;
+    isPrimary: boolean;
+    isVerified: boolean;
+  }>;
+  
+  // Identification Documents
+  identifications: Array<{
+    type: 'CCCD' | 'CMND' | 'PASSPORT' | 'DRIVING_LICENSE';
+    number: string;
+    issueDate: string;
+    expiryDate: string;
+    issuePlace: string;
+    issueCountry: string;
+    isPrimary: boolean;
+    isVerified: boolean;
+    documentImages?: string[];
+  }>;
+  
+  // Financial Profile
+  financialProfile: {
+    employmentStatus: 'EMPLOYED' | 'SELF_EMPLOYED' | 'UNEMPLOYED' | 'RETIRED';
+    monthlyIncome: number;
+    sourceOfIncome: string[];
+    netWorth: number;
+    creditScore?: number;
+    riskTolerance: 'LOW' | 'MEDIUM' | 'HIGH';
+  };
+  
+  // KYC Information
+  kycInfo: {
+    kycLevel: KYCLevel;
+    kycStatus: 'PENDING' | 'VERIFIED' | 'REJECTED' | 'EXPIRED';
+    kycDate: string;
+    nextKYCDate: string;
+    kycDocuments: string[];
+  };
+  
+  // AML/Risk Information
+  amlRiskInfo: {
+    riskRating: 'LOW' | 'MEDIUM' | 'HIGH' | 'VERY_HIGH';
+    isPEP: boolean;
+    inSanctionList: boolean;
+    lastScreeningDate: string;
+    nextScreeningDate: string;
+  };
+  
+  // Customer Segmentation
+  segmentation: {
+    segment: string[];              // e.g., ['PREMIUM', 'ACTIVE_TRADER']
+    tags: string[];
+    lifetimeValue: number;
+    acquisitionChannel: string;
+    acquisitionDate: string;
+  };
+  
+  // Customer Status
+  status: {
+    cifStatus: 'ACTIVE' | 'INACTIVE' | 'DORMANT' | 'BLOCKED' | 'CLOSED';
+    statusReason?: string;
+    lastActivityDate: string;
+    createdAt: string;
+    createdBy: string;
+    updatedAt: string;
+    updatedBy: string;
+  };
+  
+  // Relationships
+  relationships: Array<{
+    relatedCifId: string;
+    relationshipType: 'SPOUSE' | 'CHILD' | 'PARENT' | 'SIBLING' | 
+                      'BUSINESS_PARTNER' | 'BENEFICIAL_OWNER' | 'AUTHORIZED_USER';
+    isPrimary: boolean;
+  }>;
+  
+  // Preferences
+  preferences: {
+    marketingConsent: boolean;
+    dataProcessingConsent: boolean;
+    thirdPartyDataSharing: boolean;
+    notificationPreferences: {
+      email: boolean;
+      sms: boolean;
+      push: boolean;
+      inApp: boolean;
+    };
+  };
+  
+  // Metadata
+  metadata: {
+    branchCode?: string;
+    relationshipManager?: string;
+    referredBy?: string;
+    externalReferences?: Record<string, string>;
+  };
+}
+```
+
+### Customer 360° View
+
+```typescript
+interface Customer360View {
+  // Basic CIF Info
+  cif: CustomerInformationFile;
+  
+  // Accounts
+  accounts: Array<{
+    accountId: string;
+    accountNumber: string;
+    accountType: string;
+    currency: string;
+    balance: number;
+    status: string;
+    openDate: string;
+  }>;
+  
+  // Cards
+  cards: Array<{
+    cardId: string;
+    cardNumber: string;
+    cardType: string;
+    status: string;
+    expiryDate: string;
+  }>;
+  
+  // Loans & Credit
+  credits: Array<{
+    facilityId: string;
+    facilityType: string;
+    limit: number;
+    outstanding: number;
+    status: string;
+  }>;
+  
+  // Transaction Summary
+  transactionSummary: {
+    last30Days: {
+      transactionCount: number;
+      totalVolume: number;
+      averageTicketSize: number;
+    };
+    last90Days: {
+      transactionCount: number;
+      totalVolume: number;
+    };
+    last365Days: {
+      transactionCount: number;
+      totalVolume: number;
+    };
+  };
+  
+  // Recent Activities
+  recentActivities: Array<{
+    activityDate: string;
+    activityType: string;
+    description: string;
+    channel: string;
+  }>;
+  
+  // Interactions
+  interactions: Array<{
+    interactionDate: string;
+    channel: 'BRANCH' | 'CALL_CENTER' | 'EMAIL' | 'CHAT' | 'APP';
+    type: string;
+    subject: string;
+    status: string;
+  }>;
+  
+  // Complaints & Issues
+  complaints: Array<{
+    complaintId: string;
+    date: string;
+    category: string;
+    status: string;
+    resolution?: string;
+  }>;
+  
+  // Marketing Campaigns
+  campaigns: Array<{
+    campaignId: string;
+    campaignName: string;
+    sentDate: string;
+    opened: boolean;
+    clicked: boolean;
+    converted: boolean;
+  }>;
+  
+  // Risk Indicators
+  riskIndicators: {
+    delinquencyStatus: string;
+    overdraftFrequency: number;
+    returnedPayments: number;
+    fraudAlerts: number;
+  };
+}
+```
+
+## 2. Customer Relationship Management
+
+### Relationship Types
+
+```typescript
+interface CustomerRelationship {
+  relationshipId: string;
+  
+  // Primary customer
+  primaryCifId: string;
+  primaryRole: 'INDIVIDUAL' | 'BUSINESS_OWNER' | 'LEGAL_ENTITY';
+  
+  // Related customer
+  relatedCifId: string;
+  relatedRole: string;
+  
+  // Relationship
+  relationshipType: 
+    // Personal relationships
+    | 'SPOUSE' | 'CHILD' | 'PARENT' | 'SIBLING' | 'GUARDIAN'
+    // Business relationships
+    | 'BENEFICIAL_OWNER' | 'DIRECTOR' | 'SHAREHOLDER' | 'AUTHORIZED_SIGNATORY'
+    | 'BUSINESS_PARTNER' | 'EMPLOYEE'
+    // Account relationships
+    | 'JOINT_ACCOUNT_HOLDER' | 'POWER_OF_ATTORNEY' | 'NOMINEE';
+  
+  // Relationship details
+  ownershipPercentage?: number;
+  startDate: string;
+  endDate?: string;
+  isPrimary: boolean;
+  
+  // Documentation
+  documentProof?: string[];
+  
+  // Status
+  status: 'ACTIVE' | 'INACTIVE' | 'PENDING_VERIFICATION';
+  verifiedAt?: string;
+  verifiedBy?: string;
+}
+```
+
+### Relationship Hierarchy
+
+```mermaid
+graph TD
+    subgraph "Corporate Structure"
+        CORP[Company CIF]
+        CEO[CEO CIF]
+        CFO[CFO CIF]
+        BO1[Beneficial Owner 1]
+        BO2[Beneficial Owner 2]
+        
+        CORP -->|Director| CEO
+        CORP -->|Director & CFO| CFO
+        CORP -->|50% Owner| BO1
+        CORP -->|30% Owner| BO2
+    end
+    
+    subgraph "Family Structure"
+        HEAD[Head of Family]
+        SPOUSE[Spouse]
+        CHILD1[Child 1]
+        CHILD2[Child 2]
+        
+        HEAD -->|Spouse| SPOUSE
+        HEAD -->|Child| CHILD1
+        HEAD -->|Child| CHILD2
+        SPOUSE -->|Child| CHILD1
+        SPOUSE -->|Child| CHILD2
+    end
+    
+    subgraph "Joint Account"
+        JOINT[Joint Account]
+        HOLDER1[Primary Holder]
+        HOLDER2[Secondary Holder]
+        POA[Power of Attorney]
+        
+        JOINT -->|Primary| HOLDER1
+        JOINT -->|Secondary| HOLDER2
+        JOINT -->|POA| POA
+    end
+    
+    style CORP fill:#e3f2fd
+    style HEAD fill:#fff3e0
+    style JOINT fill:#f3e5f5
+```
+
+## 3. Customer Segmentation
+
+### Segmentation Dimensions
+
+```typescript
+interface CustomerSegmentation {
+  cifId: string;
+  
+  // Demographic Segmentation
+  demographic: {
+    ageGroup: '18-25' | '26-35' | '36-45' | '46-55' | '56-65' | '65+';
+    incomeGroup: 'LOW' | 'MIDDLE' | 'UPPER_MIDDLE' | 'HIGH' | 'ULTRA_HIGH';
+    location: 'URBAN' | 'SUBURBAN' | 'RURAL';
+    occupation: string;
+  };
+  
+  // Behavioral Segmentation
+  behavioral: {
+    digitalAdoption: 'LOW' | 'MEDIUM' | 'HIGH';
+    productUsage: string[];
+    channelPreference: 'BRANCH' | 'ONLINE' | 'MOBILE' | 'PHONE';
+    transactionFrequency: 'RARE' | 'OCCASIONAL' | 'FREQUENT' | 'VERY_FREQUENT';
+  };
+  
+  // Value-based Segmentation
+  valueBased: {
+    tier: 'BASIC' | 'SILVER' | 'GOLD' | 'PLATINUM' | 'DIAMOND';
+    lifetimeValue: number;
+    profitability: 'LOW' | 'MEDIUM' | 'HIGH';
+    potentialValue: number;
+  };
+  
+  // Lifecycle Stage
+  lifecycle: {
+    stage: 'PROSPECT' | 'NEW' | 'ACTIVE' | 'MATURE' | 'DORMANT' | 'AT_RISK' | 'CHURNED';
+    tenure: number;                  // months
+    lastActivityDate: string;
+  };
+  
+  // Custom Segments
+  customSegments: string[];
+  
+  // Computed at
+  computedAt: string;
+}
+```
+
+## 4. Customer Lifecycle Management
+
+### Lifecycle States
+
+```mermaid
+stateDiagram-v2
+    [*] --> Prospect: Lead captured
+    Prospect --> Onboarding: Application started
+    
+    Onboarding --> Active: KYC approved + Account opened
+    Onboarding --> Rejected: KYC failed
+    
+    Active --> Engaged: High activity
+    Engaged --> Active: Normal activity
+    
+    Active --> Dormant: 90 days no activity
+    Dormant --> Active: Reactivated
+    Dormant --> AtRisk: 180 days no activity
+    
+    AtRisk --> Active: Win-back success
+    AtRisk --> Churned: 365 days no activity
+    
+    Active --> Blocked: Fraud/Compliance issue
+    Blocked --> Active: Issue resolved
+    Blocked --> Closed: Account closed
+    
+    Active --> Closed: Customer request
+    Dormant --> Closed: Dormancy closure
+    Churned --> Closed: Final closure
+    
+    Rejected --> [*]
+    Closed --> [*]
+```
+
+### Lifecycle Triggers & Actions
+
+```typescript
+interface LifecycleRule {
+  ruleId: string;
+  name: string;
+  
+  // Trigger conditions
+  trigger: {
+    fromStage: string;
+    toStage: string;
+    conditions: Array<{
+      field: string;
+      operator: 'EQUALS' | 'GREATER_THAN' | 'LESS_THAN' | 'BETWEEN';
+      value: any;
+    }>;
+  };
+  
+  // Actions to execute
+  actions: Array<{
+    type: 'NOTIFICATION' | 'WORKFLOW' | 'SEGMENT_UPDATE' | 'ALERT';
+    config: Record<string, any>;
+  }>;
+}
+
+// Example: Dormancy Detection
+const dormancyRule: LifecycleRule = {
+  ruleId: 'RULE_DORMANCY',
+  name: 'Detect Dormant Customers',
+  trigger: {
+    fromStage: 'ACTIVE',
+    toStage: 'DORMANT',
+    conditions: [
+      { field: 'daysSinceLastTransaction', operator: 'GREATER_THAN', value: 90 },
+      { field: 'accountBalance', operator: 'GREATER_THAN', value: 0 }
+    ]
+  },
+  actions: [
+    {
+      type: 'NOTIFICATION',
+      config: {
+        channel: 'EMAIL',
+        template: 'DORMANCY_WARNING',
+        recipients: ['customer', 'relationship_manager']
+      }
+    },
+    {
+      type: 'WORKFLOW',
+      config: {
+        workflow: 'REACTIVATION_CAMPAIGN'
+      }
+    }
+  ]
+};
+```
+
+## 5. KYC/KYB - Xác minh Danh tính
+
+> **Lưu ý**: KYC/KYB là một phần quan trọng của CIF Management, được thực hiện trong giai đoạn onboarding và định kỳ xem xét lại.
 
 ## KYC Levels
 
@@ -1121,33 +1724,411 @@ const distributorKYB = {
 };
 ```
 
+## API Reference - CIF Management
+
+```typescript
+// CIF Management
+POST /api/v1/cif/create                    // Create new CIF
+GET /api/v1/cif/{cifId}                    // Get CIF details
+PUT /api/v1/cif/{cifId}                    // Update CIF
+DELETE /api/v1/cif/{cifId}                 // Delete/Close CIF
+GET /api/v1/cif/{cifId}/360-view           // Get customer 360° view
+
+// CIF Search
+GET /api/v1/cif/search                     // Search CIF
+POST /api/v1/cif/advanced-search           // Advanced search with filters
+
+// KYC Management
+POST /api/v1/cif/{cifId}/kyc/level-1       // Submit Level 1 KYC
+POST /api/v1/cif/{cifId}/kyc/level-2       // Submit Level 2 KYC
+POST /api/v1/cif/{cifId}/kyc/level-3       // Submit Level 3 KYC
+GET /api/v1/cif/{cifId}/kyc/status         // Get KYC status
+
+// AML Screening
+POST /api/v1/cif/{cifId}/aml/screening     // Run AML screening
+GET /api/v1/cif/{cifId}/aml/history        // Get screening history
+
+// Relationships
+POST /api/v1/cif/{cifId}/relationships     // Add relationship
+GET /api/v1/cif/{cifId}/relationships      // Get relationships
+PUT /api/v1/cif/relationships/{relId}      // Update relationship
+DELETE /api/v1/cif/relationships/{relId}   // Remove relationship
+
+// Segmentation
+POST /api/v1/cif/segments/compute          // Compute segments
+GET /api/v1/cif/segments                   // Get all segments
+GET /api/v1/cif/segments/{segmentId}       // Get segment details
+GET /api/v1/cif/segments/{segmentId}/members // Get segment members
+
+// Lifecycle Management
+POST /api/v1/cif/{cifId}/lifecycle/transition // Trigger lifecycle transition
+GET /api/v1/cif/{cifId}/lifecycle/history     // Get lifecycle history
+GET /api/v1/cif/lifecycle/rules               // Get lifecycle rules
+
+// Documents
+POST /api/v1/cif/{cifId}/documents         // Upload document
+GET /api/v1/cif/{cifId}/documents          // List documents
+DELETE /api/v1/cif/{cifId}/documents/{docId} // Delete document
+
+// Analytics
+GET /api/v1/cif/analytics/demographics     // Demographics report
+GET /api/v1/cif/analytics/behavior         // Behavior analysis
+GET /api/v1/cif/analytics/churn-prediction // Churn prediction
+GET /api/v1/cif/analytics/clv              // Customer lifetime value
+
+// Admin
+GET /api/v1/admin/cif/pending-kyc          // Get pending KYC reviews
+POST /api/v1/admin/cif/{cifId}/approve     // Approve CIF/KYC
+POST /api/v1/admin/cif/{cifId}/reject      // Reject CIF/KYC
+POST /api/v1/admin/cif/{cifId}/block       // Block CIF
+POST /api/v1/admin/cif/{cifId}/unblock     // Unblock CIF
+```
+
 ## Best Practices
 
-1. **Privacy & Security**
-   - Encrypt sensitive data (ID numbers, images)
-   - Access control for PII
-   - Secure storage and transmission
-   - GDPR/data protection compliance
+### 1. Data Quality & Integrity
 
-2. **User Experience**
-   - Clear instructions
-   - Real-time feedback
-   - Multiple retry attempts
-   - Support for failed verifications
+```typescript
+// Data validation on CIF creation/update
+const validateCIF = (cif: CustomerInformationFile): ValidationResult => {
+  const errors = [];
+  
+  // Required fields
+  if (!cif.contactInfo.primaryEmail) {
+    errors.push('Primary email is required');
+  }
+  
+  if (!cif.contactInfo.primaryPhone) {
+    errors.push('Primary phone is required');
+  }
+  
+  // Email format
+  if (!isValidEmail(cif.contactInfo.primaryEmail)) {
+    errors.push('Invalid email format');
+  }
+  
+  // Phone format
+  if (!isValidPhone(cif.contactInfo.primaryPhone)) {
+    errors.push('Invalid phone format');
+  }
+  
+  // Date validations
+  if (cif.personalInfo?.dateOfBirth) {
+    const age = calculateAge(cif.personalInfo.dateOfBirth);
+    if (age < 18) {
+      errors.push('Customer must be at least 18 years old');
+    }
+  }
+  
+  // Duplicate check
+  const duplicate = checkDuplicate(cif);
+  if (duplicate) {
+    errors.push(`Duplicate CIF found: ${duplicate.cifId}`);
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors
+  };
+};
+```
 
-3. **Compliance**
-   - Regular AML screening
-   - Periodic re-KYC
-   - Audit trail for all verifications
-   - Staff training on AML/CFT
+### 2. Privacy & Security
+
+- **Data Encryption**
+  - Encrypt PII (Personally Identifiable Information) at rest
+  - Use TLS/SSL for data in transit
+  - Tokenize sensitive fields (ID numbers, phone, email)
+
+- **Access Control**
+  - Role-based access control (RBAC) for CIF data
+  - Field-level security for sensitive information
+  - Audit all access to customer data
+  - Implement data masking for non-authorized users
+
+- **GDPR/Data Protection Compliance**
+  - Right to be forgotten
+  - Data portability
+  - Consent management
+  - Data retention policies
+
+### 3. Customer Experience
+
+- **Fast Onboarding**
+  - Pre-fill data from previous sources
+  - Real-time validation
+  - Progress indicators
+  - Save & resume functionality
+
+- **Self-Service**
+  - Customer portal for profile updates
+  - Document upload
+  - Status tracking
+  - Request history
+
+### 4. Data Accuracy & De-duplication
+
+```typescript
+// Fuzzy matching for duplicate detection
+const findPotentialDuplicates = async (
+  cif: CustomerInformationFile
+): Promise<DuplicateMatch[]> => {
+  const matches = [];
+  
+  // Exact match on ID number
+  if (cif.identifications[0]?.number) {
+    const exactMatch = await db('cif')
+      .where('idNumber', cif.identifications[0].number)
+      .first();
+    
+    if (exactMatch) {
+      matches.push({
+        cifId: exactMatch.cifId,
+        matchScore: 100,
+        matchType: 'ID_NUMBER'
+      });
+    }
+  }
+  
+  // Fuzzy match on name + DOB
+  const nameDobMatches = await fuzzySearch({
+    name: cif.personalInfo?.fullName,
+    dateOfBirth: cif.personalInfo?.dateOfBirth
+  });
+  
+  matches.push(...nameDobMatches);
+  
+  // Phone number match
+  const phoneMatches = await searchByPhone(cif.contactInfo.primaryPhone);
+  matches.push(...phoneMatches);
+  
+  return matches.sort((a, b) => b.matchScore - a.matchScore);
+};
+```
+
+### 5. Lifecycle Management
+
+- **Proactive Monitoring**
+  - Daily batch job for lifecycle state transitions
+  - Real-time activity tracking
+  - Automated alerts for at-risk customers
+
+- **Reactivation Campaigns**
+  - Targeted offers for dormant customers
+  - Multi-channel outreach
+  - Win-back incentives
+
+### 6. Compliance
+
+- **Regular KYC Reviews**
+  - Annual review for high-risk customers
+  - Biennial review for medium-risk
+  - Triennial review for low-risk
+
+- **AML Screening**
+  - Real-time screening on onboarding
+  - Periodic screening (monthly/quarterly)
+  - Transaction monitoring integration
+
+- **Audit Trail**
+  - Log all CIF changes
+  - Track user actions
+  - Maintain immutable audit log
+  - Retention per regulatory requirements
+
+### 7. Performance & Scalability
+
+```typescript
+// Implement caching for frequently accessed CIFs
+const getCIF = async (cifId: string): Promise<CustomerInformationFile> => {
+  // Check cache first
+  const cached = await cache.get(`cif:${cifId}`);
+  if (cached) {
+    return cached;
+  }
+  
+  // Fetch from database
+  const cif = await db('cif').where({ cifId }).first();
+  
+  // Cache for 15 minutes
+  await cache.set(`cif:${cifId}`, cif, 900);
+  
+  return cif;
+};
+
+// Pagination for list queries
+const searchCIF = async (
+  filters: SearchFilters,
+  page: number = 1,
+  pageSize: number = 50
+): Promise<PaginatedResult<CustomerInformationFile>> => {
+  const offset = (page - 1) * pageSize;
+  
+  const [data, total] = await Promise.all([
+    db('cif')
+      .where(filters)
+      .limit(pageSize)
+      .offset(offset),
+    db('cif')
+      .where(filters)
+      .count('* as count')
+      .first()
+  ]);
+  
+  return {
+    data,
+    pagination: {
+      page,
+      pageSize,
+      totalPages: Math.ceil(total.count / pageSize),
+      totalRecords: total.count
+    }
+  };
+};
+```
+
+## Use Cases trong hệ thống Masan
+
+### 1. NBL Retailer Onboarding
+
+```typescript
+// Retailer tạo tài khoản NBL
+const retailerCIF: CustomerInformationFile = {
+  cifId: 'CIF_NBL_001',
+  cifNumber: 'NBL001234567',
+  customerType: 'INDIVIDUAL',
+  customerCategory: 'SME',
+  
+  personalInfo: {
+    fullName: 'Nguyễn Văn A',
+    dateOfBirth: '1985-05-15',
+    occupation: 'Retailer',
+    employer: 'Self-employed'
+  },
+  
+  businessInfo: {
+    tradingName: 'Cửa hàng Tạp hóa Văn A',
+    businessType: 'SOLE_PROPRIETOR',
+    industryCategory: 'RETAIL_GROCERY',
+    annualRevenue: 500_000_000
+  },
+  
+  contactInfo: {
+    primaryPhone: '+84901234567',
+    primaryEmail: 'nguyenvana@email.com',
+    preferredChannel: 'SMS'
+  },
+  
+  kycInfo: {
+    kycLevel: 2,  // ID verified
+    kycStatus: 'VERIFIED'
+  },
+  
+  segmentation: {
+    segment: ['NBL_RETAILER', 'ACTIVE'],
+    acquisitionChannel: 'FIELD_SALES'
+  }
+};
+```
+
+### 2. Winlife Member
+
+```typescript
+// Thành viên Winlife
+const winlifeMemberCIF: CustomerInformationFile = {
+  cifId: 'CIF_WL_001',
+  cifNumber: 'WL001234567',
+  customerType: 'INDIVIDUAL',
+  customerCategory: 'RETAIL',
+  
+  personalInfo: {
+    fullName: 'Trần Thị B',
+    dateOfBirth: '1990-08-20',
+    occupation: 'Office Worker',
+    employer: 'ABC Corporation'
+  },
+  
+  financialProfile: {
+    employmentStatus: 'EMPLOYED',
+    monthlyIncome: 20_000_000,
+    sourceOfIncome: ['SALARY'],
+    netWorth: 500_000_000,
+    riskTolerance: 'MEDIUM'
+  },
+  
+  kycInfo: {
+    kycLevel: 4,  // Sanction list verified
+    kycStatus: 'VERIFIED'
+  },
+  
+  segmentation: {
+    segment: ['WINLIFE_MEMBER', 'ACTIVE_SPENDER'],
+    lifetimeValue: 50_000_000,
+    acquisitionChannel: 'ONLINE'
+  }
+};
+```
+
+### 3. NPP Distributor (Corporate)
+
+```typescript
+// Nhà phân phối NPP
+const nppDistributorCIF: CustomerInformationFile = {
+  cifId: 'CIF_NPP_001',
+  cifNumber: 'NPP001234567',
+  customerType: 'BUSINESS',
+  customerCategory: 'CORPORATE',
+  
+  businessInfo: {
+    legalName: 'Công ty TNHH NPP Miền Nam',
+    tradingName: 'NPP Miền Nam',
+    registrationNumber: '0123456789',
+    taxId: '0123456789-001',
+    businessType: 'COMPANY',
+    industryCategory: 'WHOLESALE_DISTRIBUTION',
+    incorporationDate: '2010-01-15',
+    numberOfEmployees: 50,
+    annualRevenue: 50_000_000_000
+  },
+  
+  kycInfo: {
+    kycLevel: 5,  // Manual review completed
+    kycStatus: 'VERIFIED'
+  },
+  
+  relationships: [
+    {
+      relatedCifId: 'CIF_IND_001',
+      relationshipType: 'BENEFICIAL_OWNER',
+      isPrimary: true
+    },
+    {
+      relatedCifId: 'CIF_IND_002',
+      relationshipType: 'DIRECTOR',
+      isPrimary: false
+    }
+  ],
+  
+  segmentation: {
+    segment: ['NPP_DISTRIBUTOR', 'HIGH_VALUE'],
+    lifetimeValue: 5_000_000_000,
+    acquisitionChannel: 'DIRECT_SALES'
+  }
+};
+```
 
 ## Kết luận
 
-KYC/KYB đảm bảo hệ thống Masan tuân thủ quy định và an toàn:
+CIF Management là phân hệ trung tâm của Core Banking System, cung cấp:
 
-- ✅ Tiered KYC cho flexibility
-- ✅ Automated verification giảm manual work
-- ✅ AML screening toàn diện
-- ✅ Periodic review duy trì compliance
-- ✅ Balance giữa security và UX
+- ✅ **Quản lý toàn diện** thông tin khách hàng từ onboarding đến closure
+- ✅ **Customer 360° View** cho cái nhìn tổng quan về khách hàng
+- ✅ **KYC/KYB tích hợp** với 5 levels và AML screening
+- ✅ **Phân khúc khách hàng** cho marketing và risk management
+- ✅ **Lifecycle Management** tự động hóa chăm sóc khách hàng
+- ✅ **Relationship Management** quản lý mối quan hệ phức tạp
+- ✅ **Analytics & Insights** hỗ trợ ra quyết định kinh doanh
+- ✅ **Compliance & Security** đảm bảo tuân thủ và bảo mật
+
+CIF Management là nền tảng để xây dựng trải nghiệm khách hàng xuất sắc và tối ưu hóa giá trị khách hàng trong hệ thống Masan TTGT.
 
