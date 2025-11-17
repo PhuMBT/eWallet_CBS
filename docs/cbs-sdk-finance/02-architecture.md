@@ -298,29 +298,115 @@ Kết nối với các hệ thống bên ngoài:
 
 ### Luồng chuyển tiền (Money Transfer)
 
+#### 3.1. Chuyển tiền Nội bộ (Internal Transfer)
+
+**Áp dụng cho:** Chuyển tiền giữa các tài khoản trong cùng hệ thống ví/ngân hàng
+
 ```mermaid
 sequenceDiagram
-    participant U as User
+    participant U as User A
     participant A as API Gateway
     participant T as Transaction Service
-    participant C as Core Engine
-    participant L as Ledger
+    participant L as Ledger System
     participant DB as Database
     participant N as Notification
     
-    U->>A: Gửi request chuyển tiền
-    A->>A: Authentication & Authorization
-    A->>T: Forward request
-    T->>C: Validate & Process
-    C->>L: Create ledger entries
-    L->>DB: Save transaction
-    DB-->>L: Confirm
-    L-->>C: Success
-    C->>N: Trigger notification
-    N-->>U: Gửi thông báo
-    C-->>T: Return result
-    T-->>A: Response
-    A-->>U: Transaction success
+    Note over U,N: Internal Transfer (Nội bộ)
+    
+    U->>A: Transfer A→B (100K)
+    A->>A: Authentication
+    A->>T: Process transfer
+    
+    T->>T: Validate accounts (A & B exist)
+    T->>T: Check balance (A ≥ 100K)
+    T->>T: Check limits & risk
+    
+    Note over T,L: Single Atomic Transaction
+    T->>L: Create ledger entries
+    L->>DB: BEGIN TRANSACTION
+    L->>DB: Dr. Account A: -100K
+    L->>DB: Cr. Account B: +100K
+    L->>DB: COMMIT
+    DB-->>L: Success
+    L-->>T: Posted
+    
+    T->>N: Notify both users
+    N-->>U: Transfer completed ✅
+    T-->>A: Success response
+    A-->>U: Transfer successful
+    
+    Note over U,N: ✅ Immediate & Final Settlement
+```
+
+#### 3.2. Chuyển tiền Liên ngân hàng (Interbank Transfer)
+
+**Áp dụng cho:** Chuyển tiền ra ngoài hệ thống (External Wallet/Bank, Napas)
+
+```mermaid
+sequenceDiagram
+    participant U as User A
+    participant A as API Gateway
+    participant T as Transaction Service
+    participant L as Ledger System
+    participant EXT as External Bank/Napas
+    participant DB as Database
+    participant N as Notification
+    
+    Note over U,N: Interbank Transfer (External)
+    
+    U->>A: Transfer A→External (100K)
+    A->>T: Process external transfer
+    T->>T: Validate & check balance
+    
+    Note over T,L: Phase 1: Reserve to Intermediate
+    T->>L: Reserve to intermediate
+    L->>DB: BEGIN TRANSACTION
+    L->>DB: Dr. Account A: -100K
+    L->>DB: Cr. Intermediate: +100K
+    L->>DB: COMMIT
+    L-->>T: Reserved
+    
+    Note over T,EXT: Phase 2: External Settlement (Retry max 3)
+    
+    loop Retry max 3 times
+        T->>EXT: Send transfer request
+        
+        alt External Success
+            EXT-->>T: Transfer completed ✅
+            
+            Note over T,L: Phase 3a: Finalize
+            T->>L: Finalize transfer
+            L->>DB: BEGIN TRANSACTION
+            L->>DB: Dr. Intermediate: -100K
+            L->>DB: Cr. Nostro Account: +100K
+            L->>DB: COMMIT
+            L-->>T: Finalized
+            
+            T->>N: Notify success
+            N-->>U: Transfer completed ✅
+        
+        else External Failed
+            EXT-->>T: Transfer failed ❌
+            
+            Note over T,L: Phase 3b: Refund Customer
+            T->>L: Refund customer
+            L->>DB: BEGIN TRANSACTION
+            L->>DB: Dr. Intermediate: -100K
+            L->>DB: Cr. Account A: +100K
+            L->>DB: COMMIT
+            L-->>T: Refunded
+            
+            alt Retry available (< 3)
+                Note over T: Wait backoff (2s, 4s, 8s)
+                Note over T,L: Retry: Reserve again
+            else Max retry reached
+                T->>N: Notify failure
+                N-->>U: Transfer failed ❌
+            end
+        end
+    end
+    
+    Note over U,N: ⏳ Delayed Settlement (retry mechanism)
 ```
 
 ### Luồng thanh toán (Payment)
