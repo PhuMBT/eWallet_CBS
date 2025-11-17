@@ -531,7 +531,7 @@ class CIFAnalytics {
                          ▼
 ┌─────────────────────────────────────────────────────┐
 │          INTEGRATION LAYER                          │
-│  Payment Gateway, Banks, National DB (Bộ Công an)  │
+│  Payment Gateway, Banks, eKYC Providers (VNPT/FPT) │
 └─────────────────────────────────────────────────────┘
 ```
 

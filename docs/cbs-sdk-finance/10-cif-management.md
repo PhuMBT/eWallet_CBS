@@ -844,7 +844,7 @@ flowchart TD
     USER_CHOICE -->|Có| STEP2[Bước 2: eKYC - Xác thực Giấy tờ]
     
     STEP2 --> STEP2_SCAN[Scan giấy tờ tùy thân<br/>+ Ghi hình gương mặt]
-    STEP2_SCAN --> STEP2_VERIFY{Verify với<br/>Bộ Công an}
+    STEP2_SCAN --> STEP2_VERIFY{Verify qua<br/>eKYC Provider<br/>VNPT/FPT/Viettel}
     
     STEP2_VERIFY -->|Failed| STEP2_REASON{Lý do?}
     STEP2_REASON -->|Low quality| STEP2_SCAN
@@ -1067,15 +1067,17 @@ async function completeStep2AndCreateCIF(
     throw new Error('Face does not match ID photo');
   }
   
-  // 4. Verify with government database (Bộ Công an)
-  const govVerification = await verifyWithPoliceDB({
+  // 4. Verify with eKYC Provider (VNPT, FPT, Viettel)
+  // eKYC Provider sẽ kết nối đến database Bộ Công an
+  const eKycVerification = await verifyWithEKYCProvider({
+    provider: 'VNPT_EKYC', // hoặc 'FPT_EKYC', 'VIETTEL_EKYC'
     idNumber: ocrResult.idNumber,
     fullName: ocrResult.fullName,
     dateOfBirth: ocrResult.dateOfBirth
   });
   
-  if (!govVerification.isValid) {
-    throw new Error('ID not found in government database or data mismatch');
+  if (!eKycVerification.isValid) {
+    throw new Error('ID not found in national database or data mismatch');
   }
   
   // 5. Check if ID already used by another CIF
@@ -1695,8 +1697,9 @@ stateDiagram-v2
     
     note right of Level2
         ✅ TẠO CIF TẠI ĐÂY
-        eKYC + Bộ Công an
-        + Bank linking
+        eKYC Provider (VNPT/FPT/Viettel)
+        → kết nối Bộ Công an
+        + Bank linking (bắt buộc)
     end note
     
     Level2 --> Level2Active: Consumer L2<br/>100M VND/month

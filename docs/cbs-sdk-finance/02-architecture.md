@@ -34,7 +34,7 @@ graph TB
     end
     
     subgraph INT["Integration Layer - External Systems"]
-        INT1[Payment Gateway<br/>External Banks<br/>Card Networks<br/>eKYC/AML Providers<br/>Napas]
+        INT1[Payment Gateway<br/>External Banks<br/>Card Networks<br/>eKYC Service Providers<br/>AML Screening Providers<br/>Napas]
     end
     
     CL -->|User Requests| GW
@@ -103,10 +103,11 @@ Lớp này bao gồm các ứng dụng và kênh tương tác với người dù
 **Vai trò:** Service chuyên biệt cho AML/KYC screening và compliance checking
 
 **Chức năng chính:**
-- **eKYC Verification**: Xác thực danh tính với Bộ Công an
+- **eKYC Verification**: Xác thực danh tính qua eKYC Service Provider
   - CCCD/Passport verification
   - Facial recognition validation
-  - National ID database lookup
+  - National ID database lookup (via eKYC provider)
+  - **eKYC Providers**: VNPT eKYC, FPT eKYC, Viettel eKYC, etc.
 - **AML Screening**: Kiểm tra chống rửa tiền
   - Sanction list screening (UN, EU, US sanctions)
   - PEP (Politically Exposed Persons) checking
@@ -128,7 +129,7 @@ Lớp này bao gồm các ứng dụng và kênh tương tác với người dù
 
 **Integration:**
 - **Upstream**: Được gọi bởi CIF Management, Risk Management
-- **Downstream**: Kết nối với Bộ Công an API, AML screening providers
+- **Downstream**: Kết nối với eKYC Service Providers (VNPT, FPT, Viettel), AML screening providers
 - **Phụ thuộc**: Core Banking Engine, CIF Management
 
 **Tại sao AML Service ở Application Layer?**
@@ -289,10 +290,17 @@ Kết nối với các hệ thống bên ngoài:
 - **Payment Gateway**: Napas, Visa, Mastercard
 - **External Banks**: Ngân hàng đối tác
 - **Card Networks**: Mạng lưới thẻ
-- **Government Systems**: 
-  - **Bộ Công an API**: eKYC verification, national ID database
-  - **AML/Sanctions Lists**: Sanction screening, PEP lists, watchlists
-  - **Credit Bureaus**: Credit history (nếu cần)
+- **Government & Compliance Systems**: 
+  - **eKYC Service Providers**: VNPT eKYC, FPT eKYC, Viettel eKYC
+    - National ID verification (kết nối đến Bộ Công an)
+    - Facial recognition
+    - Identity authentication
+  - **AML Screening Providers**: WorldCheck, Dow Jones, ComplyAdvantage
+    - Sanction lists (UN, EU, US)
+    - PEP lists
+    - Watchlists
+    - Adverse media
+  - **Credit Bureaus**: CIC (nếu cần)
 
 ## Luồng dữ liệu chính
 
@@ -446,7 +454,7 @@ sequenceDiagram
     participant CORE as Core Banking Engine
     participant CIF as CIF Management<br/>(Core Banking)
     participant AML as AML Service<br/>(Application)
-    participant GOV as Bộ Công an API
+    participant EKYC as eKYC Provider<br/>(VNPT/FPT/Viettel)
     participant DB as Database
     participant N as Notification
     
@@ -467,10 +475,10 @@ sequenceDiagram
     CORE->>CIF: Create CIF with eKYC
     
     CIF->>AML: Request eKYC verification
-    AML->>GOV: Verify ID with National DB
-    GOV-->>AML: ID verified
-    AML->>AML: Facial recognition check
-    AML->>AML: Basic AML screening
+    AML->>EKYC: Verify CCCD + Facial Recognition
+    Note over EKYC: eKYC Provider kết nối<br/>đến database Bộ Công an
+    EKYC-->>AML: ID verified + Face matched
+    AML->>AML: Basic AML screening (Sanction/PEP)
     AML-->>CIF: Verification result (APPROVED)
     
     CIF->>CIF: CREATE CIF Record
@@ -529,8 +537,9 @@ CIF Management (Core Banking Layer) ───┐
                                         ▼
             AML Service (Application Layer) ◄── Integration-heavy
                         │
-                        └──────► Bộ Công an API
-                                 (External Integration)
+                        └──────► eKYC Provider (VNPT/FPT/Viettel)
+                                 AML Screening Provider (WorldCheck)
+                                 (External Integrations)
 
 ✅ CORRECT Architecture:
   - CIF Management: Master Data at Core Banking Layer
@@ -689,10 +698,14 @@ graph LR
    - Customer 360° view
    - Marketing campaigns based on segmentation
 5. **Payment Gateway**: Cổng thanh toán Masan
-6. **National Database API**: 
-   - Bộ Công an (eKYC verification)
-   - Sanction lists, PEP lists
-   - AML screening services
+6. **eKYC & Compliance Providers**: 
+   - **eKYC Providers**: VNPT eKYC, FPT eKYC, Viettel eKYC
+     - Identity verification (kết nối đến Bộ Công an)
+     - Facial recognition
+   - **AML Screening Providers**: WorldCheck, Dow Jones, ComplyAdvantage
+     - Sanction lists (UN, EU, US)
+     - PEP lists
+     - Watchlists
 7. **WinLife System**: 
    - Tích hợp dữ liệu thành viên WinLife
    - Loyalty points và benefits
@@ -717,8 +730,8 @@ Kiến trúc SDK.Finance được thiết kế theo nguyên tắc **Layered Arch
 - ✅ Stateless và dễ scale
 - ✅ Không sở hữu master data
 - ✅ **AML Service**: Chuyên biệt cho screening & external integration
-  - Kết nối Bộ Công an API (eKYC)
-  - AML/sanction screening
+  - Kết nối eKYC Providers (VNPT, FPT, Viettel) cho identity verification
+  - Kết nối AML Screening Providers (WorldCheck) cho sanction screening
   - Customer risk assessment
   - Compliance reporting
 - ✅ **Risk Management**: Chuyên biệt cho fraud detection & monitoring
