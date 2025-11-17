@@ -609,125 +609,265 @@ const dormancyRule: LifecycleRule = {
 
 ## KYC Levels
 
+### Định nghĩa KYC Levels
+
 ```typescript
 enum KYCLevel {
-  LEVEL_0 = 0,  // Chưa xác thực - Giới hạn rất thấp
-  LEVEL_1 = 1,  // Basic - Xác thực cơ bản (phone + email)
-  LEVEL_2 = 2,  // Standard - Xác thực căn cước + selfie
-  LEVEL_3 = 3,  // Advanced - Xác thực đầy đủ + proof of address
-  LEVEL_4 = 4,  // Sanction List Verified - Đã kiểm tra danh sách trừng phạt
-  LEVEL_5 = 5   // Manual Review Completed - Đã kiểm tra thủ công high risk
+  LEVEL_1 = 1,  // User Account - Chỉ đăng ký SĐT + OTP (CHƯA TẠO CIF)
+  LEVEL_2 = 2,  // eKYC Verified - Xác thực CCCD + Facial + Bộ Công an
+  LEVEL_3 = 3,  // Sanction List Verified - Đã kiểm tra danh sách trừng phạt
+  LEVEL_4 = 4,  // Manual Review Completed - Đã kiểm tra thủ công high risk
+  LEVEL_5 = 5   // Enhanced Verification - Xác thực địa chỉ/thu nhập (Merchant)
 }
 
 interface KYCLevelLimits {
   level: KYCLevel;
+  cifCreated: boolean;          // Đã tạo CIF chưa?
+  description: string;
   limits: {
     maxBalance: number;
     dailyTransaction: number;
     monthlyTransaction: number;
   };
   features: string[];
+  requirements: string[];
+  applicableTo: string[];       // Đối tượng áp dụng
 }
 
 const KYC_LIMITS = {
-  [KYCLevel.LEVEL_0]: {
-    maxBalance: 0,
-    dailyTransaction: 0,
-    monthlyTransaction: 0,
-    features: ['view_only']
-  },
   [KYCLevel.LEVEL_1]: {
-    maxBalance: 10_000_000,      // 10 triệu
-    dailyTransaction: 5_000_000,  // 5 triệu
-    monthlyTransaction: 50_000_000, // 50 triệu
-    features: ['transfer', 'payment']
+    cifCreated: false,           // ❌ CHƯA TẠO CIF - Tránh CIF rác
+    description: 'User Account - Đăng ký tài khoản người dùng',
+    limits: {
+      maxBalance: 0,             // Không có ví
+      dailyTransaction: 0,
+      monthlyTransaction: 0
+    },
+    features: [
+      'view_app',                // Xem ứng dụng
+      'browse_products',         // Xem sản phẩm
+      'view_promotions'          // Xem khuyến mãi
+    ],
+    requirements: [
+      'Số điện thoại',
+      'Xác thực OTP'
+    ],
+    applicableTo: [
+      'Tất cả người dùng muốn dùng app'
+    ]
   },
+  
   [KYCLevel.LEVEL_2]: {
-    maxBalance: 100_000_000,     // 100 triệu
-    dailyTransaction: 50_000_000, // 50 triệu
-    monthlyTransaction: 500_000_000, // 500 triệu
-    features: ['transfer', 'payment', 'withdrawal', 'credit']
+    cifCreated: true,            // ✅ TẠO CIF KHI ĐẠT LEVEL 2
+    description: 'eKYC Verified - Xác minh danh tính điện tử',
+    limits: {
+      maxBalance: 10_000_000,    // 10 triệu - Theo quy định ví điện tử
+      dailyTransaction: 10_000_000,  // 10 triệu
+      monthlyTransaction: 20_000_000 // 20 triệu
+    },
+    features: [
+      'create_wallet',           // Tạo ví
+      'bank_linking',            // ✅ Liên kết tài khoản ngân hàng
+      'receive_money',           // Nhận tiền
+      'transfer_money',          // Chuyển tiền
+      'payment',                 // Thanh toán
+      'top_up'                   // Nạp tiền
+    ],
+    requirements: [
+      'Scan CCCD/CMND',
+      'Facial Recognition',
+      'Xác minh với Bộ Công an',
+      'Liên kết tài khoản ngân hàng'
+    ],
+    applicableTo: [
+      'Người tiêu dùng thông thường',
+      'Winlife members'
+    ]
   },
+  
   [KYCLevel.LEVEL_3]: {
-    maxBalance: 500_000_000,     // 500 triệu
-    dailyTransaction: 200_000_000, // 200 triệu
-    monthlyTransaction: 2_000_000_000, // 2 tỷ
-    features: ['all']
+    cifCreated: true,
+    description: 'Sanction List Verified - Đã kiểm tra danh sách trừng phạt',
+    limits: {
+      maxBalance: 100_000_000,   // 100 triệu - Theo quy định ví điện tử
+      dailyTransaction: 100_000_000, // 100 triệu
+      monthlyTransaction: 1_000_000_000 // 1 tỷ
+    },
+    features: [
+      'all_level_2_features',
+      'withdrawal',              // Rút tiền
+      'international_payment',   // Thanh toán quốc tế
+      'credit_access'            // Truy cập tín dụng
+    ],
+    requirements: [
+      'Tất cả yêu cầu Level 2',
+      'AML Screening - Kiểm tra Sanction Lists',
+      'PEP Check',
+      'Watchlist Check'
+    ],
+    applicableTo: [
+      'Khách hàng đã qua AML screening',
+      'Người dùng giao dịch cao'
+    ]
   },
+  
   [KYCLevel.LEVEL_4]: {
-    maxBalance: 2_000_000_000,   // 2 tỷ
-    dailyTransaction: 500_000_000, // 500 triệu
-    monthlyTransaction: 5_000_000_000, // 5 tỷ
-    features: ['all', 'international_transfer', 'high_value_transactions']
+    cifCreated: true,
+    description: 'Manual Review Completed - Đã kiểm tra thủ công high risk',
+    limits: {
+      maxBalance: 100_000_000,   // 100 triệu - Theo quy định ví điện tử
+      dailyTransaction: 100_000_000, // 100 triệu
+      monthlyTransaction: 1_000_000_000 // 1 tỷ
+    },
+    features: [
+      'all_level_3_features',
+      'high_value_transactions', // Giao dịch giá trị cao
+      'business_transactions'    // Giao dịch kinh doanh
+    ],
+    requirements: [
+      'Tất cả yêu cầu Level 3',
+      'Manual review bởi Compliance Team',
+      'Manager approval cho HIGH risk cases',
+      'Có thể yêu cầu tài liệu bổ sung'
+    ],
+    applicableTo: [
+      'Khách hàng HIGH risk đã qua review',
+      'Khách hàng là PEP được chấp nhận'
+    ]
   },
+  
   [KYCLevel.LEVEL_5]: {
-    maxBalance: Infinity,
-    dailyTransaction: Infinity,
-    monthlyTransaction: Infinity,
-    features: ['all', 'international_transfer', 'high_value_transactions', 'institutional_services']
+    cifCreated: true,
+    description: 'Enhanced Verification - Xác thực nâng cao (Merchant)',
+    limits: {
+      maxBalance: Infinity,      // Không giới hạn
+      dailyTransaction: Infinity, // > 100 triệu, tuỳ quy định Risk Management
+      monthlyTransaction: Infinity
+    },
+    features: [
+      'all_level_4_features',
+      'merchant_services',       // Dịch vụ merchant
+      'unlimited_transactions',  // Không giới hạn giao dịch
+      'bulk_payments',           // Thanh toán hàng loạt
+      'institutional_services'   // Dịch vụ tổ chức
+    ],
+    requirements: [
+      'Tất cả yêu cầu Level 4',
+      'Xác thực địa chỉ liên hệ (mailing address)',
+      'HOẶC: Xác thực nơi làm việc',
+      'HOẶC: Xác thực nguồn thu nhập',
+      'Giấy phép kinh doanh (nếu là merchant)',
+      'Giấy chứng nhận đăng ký kinh doanh'
+    ],
+    applicableTo: [
+      'Nhà phân phối Masan (NPP)',
+      'Nhà bán lẻ (NBL) chấp nhận thanh toán',
+      'Merchant offline',
+      'Doanh nghiệp SME'
+    ],
+    riskManagement: {
+      note: 'Hạn mức giao dịch cụ thể do Bộ phận Quản lý Rủi ro quy định trong từng thời kỳ',
+      minimumLimit: 100_000_000, // Tối thiểu > 100 triệu
+      reviewFrequency: 'Định kỳ theo chính sách Risk Management'
+    }
   }
 };
 ```
 
+### So sánh KYC Levels
+
+| Level | CIF Created | Mô tả | Hạn mức số dư | Hạn mức GD/ngày | Đối tượng |
+|-------|-------------|-------|---------------|-----------------|-----------|
+| **1** | ❌ Chưa | User Account (SĐT + OTP) | 0 VND | 0 VND | Người dùng app |
+| **2** | ✅ Tạo CIF | eKYC + Bộ Công an + Bank linking | 10 triệu | 10 triệu | Consumer |
+| **3** | ✅ | Sanction List Verified | 100 triệu | 100 triệu | High-volume user |
+| **4** | ✅ | Manual Review (High risk) | 100 triệu | 100 triệu | Approved high-risk |
+| **5** | ✅ | Enhanced (Merchant) | Không giới hạn | > 100 triệu* | NPP, NBL, SME |
+
+*\* Hạn mức cụ thể do Risk Management quy định*
+
 ## Hành trình Onboarding Khách hàng
 
-### Tổng quan 4 bước Onboarding
+### Tổng quan Onboarding với CIF Creation
+
+> **Quan trọng**: CIF chỉ được tạo khi khách hàng đạt **Level 2** (sau khi eKYC thành công)
 
 ```mermaid
 flowchart TD
-    START[Khách hàng bắt đầu đăng ký] --> STEP1[Bước 1: Khai báo thông tin cơ bản]
+    START[Khách hàng bắt đầu đăng ký] --> STEP1[Bước 1: Tạo User Account]
     
-    STEP1 --> STEP1_INPUT[Nhập:<br/>- Số điện thoại<br/>- Email<br/>- Địa chỉ liên lạc]
+    STEP1 --> STEP1_INPUT[Nhập:<br/>- Số điện thoại]
     STEP1_INPUT --> STEP1_VERIFY{Xác thực OTP}
     
     STEP1_VERIFY -->|Failed| STEP1_INPUT
-    STEP1_VERIFY -->|Success| LEVEL1[✓ Level 1 Completed]
+    STEP1_VERIFY -->|Success| LEVEL1[✓ Level 1: User Account<br/>❌ CHƯA TẠO CIF]
     
-    LEVEL1 --> STEP2[Bước 2: Xác thực Giấy tờ & Gương mặt]
+    LEVEL1 --> USER_CHOICE{Khách hàng<br/>muốn dùng ví?}
+    USER_CHOICE -->|Không| BROWSE[Chỉ xem app<br/>Browse products]
+    USER_CHOICE -->|Có| STEP2[Bước 2: eKYC - Xác thực Giấy tờ]
     
     STEP2 --> STEP2_SCAN[Scan giấy tờ tùy thân<br/>+ Ghi hình gương mặt]
     STEP2_SCAN --> STEP2_VERIFY{Verify với<br/>Bộ Công an}
     
     STEP2_VERIFY -->|Failed| STEP2_REASON{Lý do?}
     STEP2_REASON -->|Low quality| STEP2_SCAN
-    STEP2_REASON -->|Data mismatch| REJECTED1[Từ chối KYC]
+    STEP2_REASON -->|Data mismatch| REJECTED1[Từ chối eKYC]
     
-    STEP2_VERIFY -->|Success| LEVEL2[✓ Level 2 Completed]
+    STEP2_VERIFY -->|Success| CREATE_CIF[✅ TẠO CIF<br/>Customer Information File]
+    CREATE_CIF --> BANK_LINK[Liên kết<br/>tài khoản ngân hàng]
+    BANK_LINK --> LEVEL2[✓ Level 2: eKYC Verified<br/>CIF Created<br/>Hạn mức: 10 triệu/ngày]
     
-    LEVEL2 --> STEP3[Bước 3: AML Screening]
+    LEVEL2 --> STEP3[Bước 3: AML Screening<br/>Tự động]
     
     STEP3 --> STEP3_CHECK[Kiểm tra:<br/>- Sanction lists<br/>- PEP lists<br/>- Watchlists<br/>- Adverse media]
-    STEP3_CHECK --> STEP3_RESULT{Risk Level}
+    STEP3_CHECK --> STEP3_RESULT{Risk Score}
     
-    STEP3_RESULT -->|HIGH RISK| STEP4[Bước 4: Manual Review]
+    STEP3_RESULT -->|LOW RISK<br/>Score < 25| LEVEL3[✓ Level 3: Sanction List Verified<br/>Hạn mức: 100 triệu/ngày]
     STEP3_RESULT -->|FOUND in<br/>Sanction List| REJECTED2[Block Account]
-    STEP3_RESULT -->|LOW/MEDIUM<br/>RISK| LEVEL4[✓ Level 4 Completed<br/>Sanction List Verified]
+    STEP3_RESULT -->|MEDIUM/HIGH RISK<br/>Score >= 25| STEP4[Bước 4: Manual Review]
     
     STEP4 --> STEP4_REVIEW[Compliance Team<br/>kiểm tra thủ công]
     STEP4_REVIEW --> STEP4_DECISION{Quyết định}
     
-    STEP4_DECISION -->|Approved| LEVEL5[✓ Level 5 Completed<br/>Manual Review Passed]
+    STEP4_DECISION -->|Approved| LEVEL4[✓ Level 4: Manual Review Passed<br/>Hạn mức: 100 triệu/ngày]
     STEP4_DECISION -->|Rejected| REJECTED3[Từ chối & Block]
     STEP4_DECISION -->|Need more info| STEP4_REQUEST[Yêu cầu<br/>bổ sung tài liệu]
     
     STEP4_REQUEST --> STEP4_UPLOAD[Customer upload<br/>thêm documents]
     STEP4_UPLOAD --> STEP4_REVIEW
     
-    LEVEL4 --> ACTIVE1[Tài khoản Active<br/>Hạn mức Level 4]
-    LEVEL5 --> ACTIVE2[Tài khoản Active<br/>Hạn mức Level 5<br/>Không giới hạn]
+    LEVEL3 --> CONSUMER_USE[Sử dụng ví<br/>Consumer]
+    LEVEL4 --> CONSUMER_USE
     
+    LEVEL4 --> MERCHANT_CHOICE{Merchant<br/>cần hạn mức cao?}
+    MERCHANT_CHOICE -->|Không| CONSUMER_USE
+    MERCHANT_CHOICE -->|Có| STEP5[Bước 5: Enhanced Verification]
+    
+    STEP5 --> STEP5_DOCS[Xác thực:<br/>- Địa chỉ liên hệ<br/>- Nơi làm việc<br/>- Nguồn thu nhập<br/>- Giấy phép KD]
+    STEP5_DOCS --> STEP5_VERIFY{Xác minh<br/>thành công?}
+    
+    STEP5_VERIFY -->|Failed| STEP5_DOCS
+    STEP5_VERIFY -->|Success| LEVEL5[✓ Level 5: Enhanced Merchant<br/>Hạn mức: > 100 triệu*<br/>Risk Management quyết định]
+    
+    LEVEL5 --> MERCHANT_USE[Sử dụng dịch vụ<br/>Merchant: NPP, NBL]
+    
+    BROWSE --> END0[End]
     REJECTED1 --> END1[End]
     REJECTED2 --> END2[End]
     REJECTED3 --> END3[End]
-    ACTIVE1 --> END4[End]
-    ACTIVE2 --> END5[End]
+    CONSUMER_USE --> END4[End]
+    MERCHANT_USE --> END5[End]
     
     style STEP1 fill:#e3f2fd
     style STEP2 fill:#e3f2fd
+    style CREATE_CIF fill:#4caf50
+    style BANK_LINK fill:#4caf50
     style STEP3 fill:#fff3e0
     style STEP4 fill:#fce4ec
-    style LEVEL1 fill:#c8e6c9
+    style STEP5 fill:#f3e5f5
+    style LEVEL1 fill:#ffeb3b
     style LEVEL2 fill:#c8e6c9
+    style LEVEL3 fill:#c8e6c9
     style LEVEL4 fill:#c8e6c9
     style LEVEL5 fill:#a5d6a7
     style REJECTED1 fill:#ffcdd2
@@ -737,69 +877,83 @@ flowchart TD
 
 ### Chi tiết từng bước
 
-#### Bước 1: Khai báo thông tin cơ bản
+#### Bước 1: Tạo User Account (Level 1) - CHƯA TẠO CIF
+
+> **Quan trọng**: Ở bước này chỉ tạo **User Account** (không tạo CIF) để tránh CIF "rác"
 
 ```typescript
-interface Step1BasicInfo {
-  // Contact information
+interface Step1UserAccount {
+  // Chỉ cần thông tin tối thiểu
+  userId: string;               // Generated user ID
   phoneNumber: string;          // Bắt buộc
   phoneCountryCode: string;     // e.g., +84
   phoneVerified: boolean;
   phoneOTP?: string;
   
-  email: string;                // Bắt buộc
-  emailVerified: boolean;
-  emailOTP?: string;
+  // Status
+  userStatus: 'ACTIVE' | 'INACTIVE';
+  kycLevel: 1;                  // Level 1 - User Account
+  cifCreated: false;            // ❌ CHƯA TẠO CIF
   
-  // Basic personal info
-  fullName: string;
-  dateOfBirth?: string;
-  gender?: 'MALE' | 'FEMALE' | 'OTHER';
-  
-  // Contact address (không cần proof)
-  contactAddress: {
-    street?: string;
-    ward?: string;
-    district?: string;
-    city: string;
-    country: string;
-  };
+  // Timestamps
+  createdAt: string;
+  lastLoginAt?: string;
 }
 
-async function completeStep1(data: Step1BasicInfo): Promise<void> {
+async function completeStep1(phoneNumber: string, otp: string): Promise<Step1UserAccount> {
   // 1. Validate phone number format
-  if (!isValidPhoneNumber(data.phoneNumber, data.phoneCountryCode)) {
+  if (!isValidPhoneNumber(phoneNumber)) {
     throw new Error('Invalid phone number');
   }
   
-  // 2. Send OTP to phone
-  await sendPhoneOTP(data.phoneNumber);
-  
-  // 3. Verify OTP
-  const phoneVerified = await verifyPhoneOTP(data.phoneNumber, data.phoneOTP);
+  // 2. Verify OTP
+  const phoneVerified = await verifyPhoneOTP(phoneNumber, otp);
   if (!phoneVerified) {
     throw new Error('Phone OTP verification failed');
   }
   
-  // 4. Send OTP to email
-  await sendEmailOTP(data.email);
-  
-  // 5. Verify email OTP
-  const emailVerified = await verifyEmailOTP(data.email, data.emailOTP);
-  if (!emailVerified) {
-    throw new Error('Email OTP verification failed');
+  // 3. Check if phone already registered
+  const existingUser = await db('users').where({ phoneNumber }).first();
+  if (existingUser) {
+    throw new Error('Phone number already registered');
   }
   
-  // 6. Save basic info and upgrade to Level 1
-  await saveUserData(data);
-  await upgradeKYCLevel(data.userId, KYCLevel.LEVEL_1);
+  // 4. Create User Account (NO CIF yet)
+  const userId = generateUserId();
+  const user: Step1UserAccount = {
+    userId,
+    phoneNumber,
+    phoneCountryCode: '+84',
+    phoneVerified: true,
+    userStatus: 'ACTIVE',
+    kycLevel: 1,
+    cifCreated: false,         // ❌ CHƯA TẠO CIF
+    createdAt: new Date().toISOString()
+  };
+  
+  await db('users').insert(user);
+  
+  // 5. User can now browse app (no wallet, no CIF)
+  return user;
 }
 ```
 
-#### Bước 2: Scan giấy tờ & Verify với Bộ Công an
+**Chức năng Level 1:**
+- ✅ Đăng nhập vào app
+- ✅ Xem sản phẩm
+- ✅ Xem khuyến mãi
+- ❌ Không có ví
+- ❌ Không thể giao dịch
+- ❌ Chưa có CIF
+
+#### Bước 2: eKYC - Xác thực CCCD & TẠO CIF (Level 2)
+
+> **Quan trọng**: CIF được tạo ở bước này sau khi eKYC thành công
 
 ```typescript
-interface Step2IDVerification {
+interface Step2eKYCVerification {
+  userId: string;               // From Step 1
+  
   // ID Document
   idType: 'CCCD' | 'CMND' | 'PASSPORT';
   idFrontImage: string;         // Base64 or URL
@@ -807,10 +961,10 @@ interface Step2IDVerification {
   
   // Selfie
   selfieImage: string;
-  selfieVideo?: string;         // Optional liveness check
+  selfieVideo?: string;         // Liveness check
   
   // Extracted from OCR
-  ocrData?: {
+  ocrData: {
     idNumber: string;
     fullName: string;
     dateOfBirth: string;
@@ -821,12 +975,24 @@ interface Step2IDVerification {
     issueDate: string;
     expiryDate: string;
   };
+  
+  // Government verification
+  govVerified: boolean;
+  govVerificationData: any;
+  
+  // Bank linking
+  bankAccount?: {
+    bankCode: string;
+    accountNumber: string;
+    accountName: string;
+  };
 }
 
-async function completeStep2(
+async function completeStep2AndCreateCIF(
   userId: string,
-  data: Step2IDVerification
-): Promise<void> {
+  data: Step2eKYCVerification
+): Promise<{ cifId: string; kycLevel: 2 }> {
+  
   // 1. OCR - Extract data from ID card
   const ocrResult = await performOCR({
     frontImage: data.idFrontImage,
@@ -837,7 +1003,7 @@ async function completeStep2(
     throw new Error('Image quality too low. Please retake photos.');
   }
   
-  // 2. Liveness check (if video provided)
+  // 2. Liveness check
   if (data.selfieVideo) {
     const isLive = await checkLiveness(data.selfieVideo);
     if (!isLive) {
@@ -866,27 +1032,127 @@ async function completeStep2(
     throw new Error('ID not found in government database or data mismatch');
   }
   
-  // 5. Check if ID already used by another account
-  const isDuplicate = await checkDuplicateID(ocrResult.idNumber);
-  if (isDuplicate) {
-    throw new Error('This ID is already registered');
+  // 5. Check if ID already used by another CIF
+  const existingCIF = await db('cif')
+    .where('idNumber', ocrResult.idNumber)
+    .first();
+  
+  if (existingCIF) {
+    throw new Error('This ID is already registered with another account');
   }
   
-  // 6. Save ID data and upgrade to Level 2
-  await saveIDVerification(userId, {
-    ...ocrResult,
-    faceMatchScore,
-    govVerified: true,
-    govVerificationData: govVerification,
-    verifiedAt: new Date()
+  // 6. ✅ CREATE CIF - Customer Information File
+  const cifId = generateCIFId();
+  const cifNumber = generateCIFNumber();
+  
+  const cif: CustomerInformationFile = {
+    cifId,
+    cifNumber,
+    customerType: 'INDIVIDUAL',
+    customerCategory: 'RETAIL',
+    
+    personalInfo: {
+      prefix: detectPrefix(ocrResult.gender),
+      firstName: extractFirstName(ocrResult.fullName),
+      lastName: extractLastName(ocrResult.fullName),
+      fullName: ocrResult.fullName,
+      dateOfBirth: ocrResult.dateOfBirth,
+      placeOfBirth: ocrResult.placeOfOrigin,
+      gender: ocrResult.gender,
+      nationality: ocrResult.nationality,
+      countryOfResidence: 'VN'
+    },
+    
+    contactInfo: {
+      primaryPhone: await getUserPhone(userId),
+      primaryEmail: '',  // Can be updated later
+      preferredLanguage: 'vi',
+      preferredChannel: 'APP'
+    },
+    
+    addresses: [{
+      type: 'PERMANENT',
+      ...parseAddress(ocrResult.placeOfResidence),
+      isPrimary: true,
+      isVerified: true
+    }],
+    
+    identifications: [{
+      type: data.idType,
+      number: ocrResult.idNumber,
+      issueDate: ocrResult.issueDate,
+      expiryDate: ocrResult.expiryDate,
+      issuePlace: extractIssuePlace(ocrResult),
+      issueCountry: 'VN',
+      isPrimary: true,
+      isVerified: true,
+      documentImages: [data.idFrontImage, data.idBackImage]
+    }],
+    
+    kycInfo: {
+      kycLevel: 2,
+      kycStatus: 'VERIFIED',
+      kycDate: new Date().toISOString(),
+      nextKYCDate: calculateNextKYCDate(2), // 2 years for retail
+      kycDocuments: [data.idFrontImage, data.idBackImage, data.selfieImage]
+    },
+    
+    amlRiskInfo: {
+      riskRating: 'LOW',  // Will be updated in Step 3
+      isPEP: false,
+      inSanctionList: false,
+      lastScreeningDate: new Date().toISOString(),
+      nextScreeningDate: calculateNextScreeningDate()
+    },
+    
+    status: {
+      cifStatus: 'ACTIVE',
+      lastActivityDate: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      createdBy: 'SYSTEM_eKYC',
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'SYSTEM_eKYC'
+    }
+  };
+  
+  // 7. Save CIF to database
+  await db('cif').insert(cif);
+  
+  // 8. Update user record with CIF reference
+  await db('users').where({ userId }).update({
+    cifId,
+    cifCreated: true,
+    kycLevel: 2,
+    eKYCVerifiedAt: new Date()
   });
   
-  await upgradeKYCLevel(userId, KYCLevel.LEVEL_2);
+  // 9. Link bank account if provided
+  if (data.bankAccount) {
+    await linkBankAccount(cifId, data.bankAccount);
+  }
   
-  // 7. Automatically proceed to Step 3 (AML Screening)
-  await initiateStep3(userId);
+  // 10. Create wallet account
+  await createWalletAccount(cifId, 'VND');
+  
+  // 11. Automatically proceed to Step 3 (AML Screening)
+  await initiateStep3AMLScreening(cifId);
+  
+  return {
+    cifId,
+    kycLevel: 2
+  };
 }
 ```
+
+**Chức năng Level 2:**
+- ✅ CIF đã được tạo
+- ✅ Có tài khoản ví
+- ✅ Liên kết tài khoản ngân hàng
+- ✅ Nạp tiền
+- ✅ Nhận tiền
+- ✅ Chuyển tiền
+- ✅ Thanh toán
+- 📊 Hạn mức: 10 triệu/ngày, 20 triệu/tháng
 
 #### Bước 3: AML Screening (Sanction List)
 
@@ -1002,23 +1268,27 @@ async function completeStep3(userId: string): Promise<Step3AMLScreening> {
   
   // 6. Determine risk level and decision
   let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-  let decision: 'AUTO_APPROVE' | 'MANUAL_REVIEW' | 'REJECT';
+  let decision: 'AUTO_APPROVE_LEVEL_3' | 'MANUAL_REVIEW' | 'REJECT';
   
   if (riskScore < 25) {
     riskLevel = 'LOW';
-    decision = 'AUTO_APPROVE';
-    // Upgrade to Level 4
-    await upgradeKYCLevel(userId, KYCLevel.LEVEL_4);
+    decision = 'AUTO_APPROVE_LEVEL_3';
+    // ✅ Automatically upgrade to Level 3
+    await db('cif').where({ cifId }).update({
+      'kycInfo.kycLevel': 3,
+      'amlRiskInfo.riskRating': 'LOW'
+    });
+    await db('users').where({ cifId }).update({ kycLevel: 3 });
   } else if (riskScore < 50) {
     riskLevel = 'MEDIUM';
     decision = 'MANUAL_REVIEW';
-    // Queue for manual review (Step 4)
-    await queueForManualReview(userId, 'MEDIUM_RISK');
+    // Queue for manual review (Step 4) -> Level 4 if approved
+    await queueForManualReview(cifId, 'MEDIUM_RISK');
   } else {
     riskLevel = 'HIGH';
     decision = 'MANUAL_REVIEW';
-    // Queue for enhanced manual review (Step 4)
-    await queueForManualReview(userId, 'HIGH_RISK');
+    // Queue for enhanced manual review (Step 4) -> Level 4 if approved
+    await queueForManualReview(cifId, 'HIGH_RISK');
   }
   
   // 7. Save screening results
@@ -1113,7 +1383,7 @@ async function processManualReview(
       return;
     }
     
-    // Approve and upgrade to Level 5
+    // Approve and upgrade to Level 4
     await updateManualReview(reviewId, {
       status: 'COMPLETED',
       finalDecision: 'APPROVED',
@@ -1121,12 +1391,18 @@ async function processManualReview(
       reviewedAt: new Date()
     });
     
-    await upgradeKYCLevel(review.userId, KYCLevel.LEVEL_5);
+    // ✅ Upgrade to Level 4 after manual review
+    await db('cif').where({ cifId: review.cifId }).update({
+      'kycInfo.kycLevel': 4,
+      'amlRiskInfo.riskRating': review.riskLevel
+    });
+    await db('users').where({ cifId: review.cifId }).update({ kycLevel: 4 });
     
     // Notify customer
-    await notifyCustomer(review.userId, {
+    await notifyCustomer(review.cifId, {
       type: 'KYC_APPROVED',
-      level: KYCLevel.LEVEL_5
+      level: 4,
+      message: 'Your account has been approved. Transaction limit: 100 million VND/day'
     });
     
     return;
@@ -1169,11 +1445,17 @@ async function managerApproveReview(
       reviewedAt: new Date()
     });
     
-    await upgradeKYCLevel(review.userId, KYCLevel.LEVEL_5);
+    // ✅ Upgrade to Level 4 after manager approval
+    await db('cif').where({ cifId: review.cifId }).update({
+      'kycInfo.kycLevel': 4,
+      'amlRiskInfo.riskRating': review.riskLevel
+    });
+    await db('users').where({ cifId: review.cifId }).update({ kycLevel: 4 });
     
-    await notifyCustomer(review.userId, {
+    await notifyCustomer(review.cifId, {
       type: 'KYC_APPROVED',
-      level: KYCLevel.LEVEL_5
+      level: 4,
+      message: 'Your high-risk account has been approved by manager. Transaction limit: 100 million VND/day'
     });
   } else {
     await updateManualReview(reviewId, {
@@ -1184,9 +1466,9 @@ async function managerApproveReview(
       reviewedAt: new Date()
     });
     
-    await blockAccount(review.userId, `KYC rejected by manager: ${notes}`);
+    await blockAccount(review.cifId, `KYC rejected by manager: ${notes}`);
     
-    await notifyCustomer(review.userId, {
+    await notifyCustomer(review.cifId, {
       type: 'KYC_REJECTED',
       reason: notes
     });
@@ -1194,32 +1476,197 @@ async function managerApproveReview(
 }
 ```
 
-## KYC Flow (Cập nhật)
+**Chức năng Level 3 & 4:**
+- ✅ Đã qua AML screening
+- ✅ Hạn mức: 100 triệu/ngày, 1 tỷ/tháng
+- ✅ Rút tiền
+- ✅ Thanh toán quốc tế
+- ✅ Truy cập tín dụng
+
+#### Bước 5: Enhanced Verification (Level 5) - Dành cho Merchant
+
+> **Level 5 dành riêng cho**: Merchant offline như NPP, NBL cần hạn mức giao dịch cao (> 100 triệu)
+
+```typescript
+interface Step5EnhancedVerification {
+  cifId: string;                // From Level 4
+  
+  // Address verification (chọn 1 trong 3)
+  addressVerification?: {
+    type: 'MAILING_ADDRESS';
+    address: string;
+    proofDocument: string;      // Utility bill, bank statement
+    verificationMethod: 'DOCUMENT' | 'VISIT';
+    verifiedAt?: string;
+  };
+  
+  // Employment verification (chọn 1 trong 3)
+  employmentVerification?: {
+    type: 'WORKPLACE';
+    employer: string;
+    position: string;
+    employmentLetter: string;
+    contactPerson: string;
+    contactPhone: string;
+    verifiedAt?: string;
+  };
+  
+  // Income verification (chọn 1 trong 3)
+  incomeVerification?: {
+    type: 'INCOME_SOURCE';
+    sourceType: 'BUSINESS' | 'SALARY' | 'INVESTMENT';
+    monthlyIncome: number;
+    proofDocuments: string[];   // Tax returns, pay slips, business license
+    verifiedAt?: string;
+  };
+  
+  // Business documents (bắt buộc cho merchant)
+  businessDocuments: {
+    businessLicense: {
+      fileUrl: string;
+      licenseNumber: string;
+      issueDate: string;
+      expiryDate: string;
+    };
+    businessRegistration: {
+      fileUrl: string;
+      registrationNumber: string;
+      issueDate: string;
+    };
+    taxCertificate?: {
+      fileUrl: string;
+      taxId: string;
+    };
+  };
+  
+  // Merchant type
+  merchantType: 'NPP_DISTRIBUTOR' | 'NBL_RETAILER' | 'SME_BUSINESS';
+  
+  // Risk management limits (set by Risk team)
+  requestedDailyLimit: number;
+  requestedMonthlyLimit: number;
+}
+
+async function completeStep5AndUpgradeToLevel5(
+  cifId: string,
+  data: Step5EnhancedVerification
+): Promise<{ kycLevel: 5; approvedLimits: any }> {
+  
+  // 1. Verify at least one of: address, employment, or income
+  const hasAddressVerification = !!data.addressVerification;
+  const hasEmploymentVerification = !!data.employmentVerification;
+  const hasIncomeVerification = !!data.incomeVerification;
+  
+  if (!hasAddressVerification && !hasEmploymentVerification && !hasIncomeVerification) {
+    throw new Error('Must verify at least one: address, employment, or income source');
+  }
+  
+  // 2. Verify business documents
+  if (!data.businessDocuments.businessLicense) {
+    throw new Error('Business license is required for Level 5');
+  }
+  
+  if (!data.businessDocuments.businessRegistration) {
+    throw new Error('Business registration is required for Level 5');
+  }
+  
+  // 3. Update CIF with enhanced information
+  await db('cif').where({ cifId }).update({
+    'kycInfo.kycLevel': 5,
+    'kycInfo.kycStatus': 'VERIFIED',
+    'kycInfo.kycDate': new Date(),
+    customerCategory: 'SME',  // Upgrade to SME/Corporate
+    businessInfo: {
+      tradingName: data.merchantType,
+      // ... other business info
+    }
+  });
+  
+  // 4. Submit to Risk Management for limit approval
+  const riskApproval = await submitToRiskManagement({
+    cifId,
+    merchantType: data.merchantType,
+    requestedDailyLimit: data.requestedDailyLimit,
+    requestedMonthlyLimit: data.requestedMonthlyLimit,
+    businessDocuments: data.businessDocuments,
+    verifications: {
+      address: hasAddressVerification,
+      employment: hasEmploymentVerification,
+      income: hasIncomeVerification
+    }
+  });
+  
+  // 5. Wait for Risk Management approval (can be async)
+  // Risk team will set specific limits based on business assessment
+  
+  return {
+    kycLevel: 5,
+    approvedLimits: {
+      status: 'PENDING_RISK_APPROVAL',
+      minimumDailyLimit: 100_000_000,  // Minimum > 100 million
+      note: 'Specific limits will be set by Risk Management team within 24-48 hours'
+    }
+  };
+}
+```
+
+**Chức năng Level 5:**
+- ✅ Enhanced merchant verification
+- ✅ Hạn mức giao dịch: > 100 triệu (cụ thể do Risk Management quyết định)
+- ✅ Merchant services
+- ✅ Bulk payments
+- ✅ Không giới hạn số dư
+- 🎯 **Đối tượng**: NPP Masan, NBL retailers, SME businesses
+
+## KYC Flow State Diagram (Cập nhật)
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Level0: Sign up
-    Level0 --> Level1: Step 1: Phone + Email verified
-    Level1 --> Level2: Step 2: ID + Gov DB verified
-    Level2 --> Level3: Address verified (optional)
-    Level2 --> AMLScreening: Step 3: AML Screening
-    Level3 --> AMLScreening: Step 3: AML Screening
+    [*] --> Level1: Sign up (Phone + OTP)
     
-    AMLScreening --> Level4: LOW risk - Auto approved
-    AMLScreening --> ManualReview: MEDIUM/HIGH risk
-    AMLScreening --> Rejected: Found in sanction list
+    note right of Level1
+        ❌ CHƯA TẠO CIF
+        Chỉ tạo User Account
+    end note
+    
+    Level1 --> BrowseOnly: User chỉ xem app
+    Level1 --> Level2: User muốn dùng ví<br/>eKYC verification
+    
+    note right of Level2
+        ✅ TẠO CIF TẠI ĐÂY
+        eKYC + Bộ Công an
+        + Bank linking
+    end note
+    
+    Level2 --> AMLScreening: Automatic AML Screening
+    
+    AMLScreening --> Level3: LOW risk (Score < 25)<br/>Auto approved
+    AMLScreening --> ManualReview: MEDIUM/HIGH risk<br/>(Score >= 25)
+    AMLScreening --> Blocked: Found in sanction list
     
     ManualReview --> RequestDocs: Need more info
     RequestDocs --> ManualReview: Docs submitted
     
-    ManualReview --> Level5: Step 4: Approved
-    ManualReview --> Rejected: Step 4: Rejected
+    ManualReview --> Level4: Approved by Compliance
+    ManualReview --> Blocked: Rejected
     
-    Level4 --> Active: Account active (Level 4 limits)
-    Level5 --> Active: Account active (No limits)
+    Level3 --> ConsumerActive: Consumer usage<br/>100M VND/day limit
+    Level4 --> ConsumerActive: Consumer usage<br/>100M VND/day limit
+    Level4 --> Level5: Merchant needs high limit<br/>Enhanced verification
     
-    Rejected --> [*]
-    Active --> [*]
+    note right of Level5
+        Merchant: NPP, NBL
+        Verify: Address/Work/Income
+        + Business documents
+        Limit: > 100M (Risk approval)
+    end note
+    
+    Level5 --> MerchantActive: Merchant usage<br/>High limits (Risk-approved)
+    
+    BrowseOnly --> [*]
+    ConsumerActive --> [*]
+    MerchantActive --> [*]
+    Blocked --> [*]
 ```
 
 ### Level 1: Basic Verification
