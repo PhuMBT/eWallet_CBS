@@ -29,7 +29,8 @@ graph TB
         G[Transaction Service]
         H[Payment Service]
         I[Credit Service]
-        J[Notification Service]
+        J[CIF Management Service]
+        K1[Notification Service]
     end
     
     subgraph "Core Banking Layer"
@@ -59,10 +60,12 @@ graph TB
     E --> H
     E --> I
     E --> J
+    E --> K1
     F --> K
     G --> K
     H --> K
     I --> K
+    J --> K
     K --> L
     K --> M
     K --> N
@@ -71,6 +74,7 @@ graph TB
     H --> Q
     H --> R
     H --> S
+    J --> F
 ```
 
 ## Các lớp kiến trúc chính
@@ -122,6 +126,23 @@ Bao gồm các microservices độc lập, mỗi service chịu tr책nhiệm m�
 - Credit scoring
 - Quản lý khoản vay
 - Tính lãi và phí
+
+#### CIF Management Service (Dịch vụ quản lý thông tin khách hàng)
+- **Customer Onboarding**: Tiếp nhận và xác minh khách hàng mới
+- **KYC/KYB Verification**: Xác thực danh tính (5 cấp độ theo TT 40/2024/TT-NHNN)
+  - Level 1: User Account (không CIF)
+  - Level 2: eKYC cơ bản (tạo CIF, 100M/tháng)
+  - Level 3: eKYC nâng cao (500M/tháng)
+  - Level 4: Xác thực đầy đủ (không giới hạn)
+  - Level 5: Enhanced Merchant (NPP, NBL)
+- **Customer Profile Management**: Quản lý hồ sơ khách hàng toàn diện
+- **Relationship Management**: Quản lý quan hệ khách hàng (cá nhân, doanh nghiệp)
+- **Customer Segmentation**: Phân loại và phân khúc khách hàng
+- **Lifecycle Management**: Quản lý vòng đời khách hàng
+- **Document Management**: Quản lý tài liệu, giấy tờ khách hàng
+- **Customer 360° View**: Góc nhìn toàn diện về khách hàng
+- **AML Screening**: Kiểm tra danh sách trừng phạt, PEP, watchlist
+- **Compliance Management**: Đảm bảo tuân thủ quy định KYC/AML
 
 #### Notification Service (Dịch vụ thông báo)
 - Push notification
@@ -239,6 +260,59 @@ sequenceDiagram
     P-->>M: Payment success
 ```
 
+### Luồng Onboarding Khách hàng (Customer Onboarding với CIF)
+
+```mermaid
+sequenceDiagram
+    participant U as User/Customer
+    participant A as API Gateway
+    participant CIF as CIF Management
+    participant KYC as KYC/AML Service
+    participant GOV as Bộ Công an API
+    participant ACC as Account Service
+    participant DB as Database
+    participant N as Notification
+    
+    Note over U,N: Bước 1: Tạo User Account (Level 1)
+    U->>A: Đăng ký với SĐT + OTP
+    A->>CIF: Create User Account
+    CIF->>DB: Save user (NO CIF yet)
+    DB-->>CIF: User created
+    CIF-->>U: Level 1 - Browse only
+    
+    Note over U,N: Bước 2: eKYC & Tạo CIF (Level 2)
+    U->>A: Upload CCCD + Selfie
+    A->>CIF: Request eKYC verification
+    CIF->>KYC: Verify ID + Face
+    KYC->>GOV: Verify with National DB
+    GOV-->>KYC: Verified OK
+    KYC->>KYC: AML Screening (Basic)
+    KYC-->>CIF: Verification success
+    
+    CIF->>CIF: CREATE CIF
+    CIF->>DB: Save CIF + Customer Info
+    CIF->>ACC: Create wallet account
+    ACC-->>CIF: Account created
+    
+    CIF->>N: Notify KYC approved
+    N-->>U: Level 2 - 100M/month
+    CIF-->>A: CIF created successfully
+    A-->>U: Onboarding complete
+    
+    Note over U,N: Bước 3: Nâng cấp Level (Optional)
+    U->>CIF: Request higher limit
+    CIF->>KYC: Enhanced verification
+    KYC->>KYC: Biometric + AML check
+    alt Low Risk
+        KYC-->>CIF: Level 3 - 500M/month
+    else High Risk
+        KYC->>KYC: Manual review
+        KYC-->>CIF: Level 4 - Unlimited
+    end
+    CIF->>N: Notify limit upgrade
+    N-->>U: Level upgraded
+```
+
 ## Bảo mật
 
 ### Authentication & Authorization
@@ -254,6 +328,18 @@ sequenceDiagram
 - **Encryption at rest**: AES-256
 - **PCI-DSS compliance** cho dữ liệu thẻ
 - **Data masking** cho PII (Personal Identifiable Information)
+- **CIF Data Protection** (theo TT 40/2024 & Luật An ninh mạng):
+  - Mã hóa dữ liệu khách hàng nhạy cảm (CCCD, Passport, sinh trắc học)
+  - Phân quyền truy cập CIF theo role (RBAC)
+  - Audit trail cho mọi truy cập/thay đổi CIF
+  - Data retention policy (lưu trữ tối thiểu theo quy định pháp luật)
+  - Right to be forgotten (quyền xóa dữ liệu cá nhân)
+  - GDPR/PDPA compliance cho dữ liệu cá nhân
+- **KYC Document Security**:
+  - Encrypted storage cho ảnh CCCD, selfie, documents
+  - Watermarking cho documents
+  - Access logging và monitoring
+  - Automatic expiration cho documents hết hạn
 
 ### Network Security
 
@@ -369,10 +455,21 @@ graph LR
 ### Integration Points
 
 1. **Wallet Application**: Ứng dụng ví điện tử Masan
-2. **Retail System**: Hệ thống bán lẻ
-3. **DMS**: Distribution Management System
+2. **Retail System**: Hệ thống bán lẻ (NBL)
+3. **DMS**: Distribution Management System (NPP)
 4. **CRM**: Customer Relationship Management
+   - Đồng bộ thông tin khách hàng từ CIF
+   - Customer 360° view
+   - Marketing campaigns based on segmentation
 5. **Payment Gateway**: Cổng thanh toán Masan
+6. **National Database API**: 
+   - Bộ Công an (eKYC verification)
+   - Sanction lists, PEP lists
+   - AML screening services
+7. **WinLife System**: 
+   - Tích hợp dữ liệu thành viên WinLife
+   - Loyalty points và benefits
+   - Customer lifecycle events
 
 ### API Integration
 
@@ -390,4 +487,14 @@ Kiến trúc SDK.Finance được thiết kế để:
 - ✅ Bảo mật và tuân thủ các quy định
 - ✅ Tích hợp linh hoạt với các hệ thống khác
 - ✅ Hỗ trợ disaster recovery và high availability
+- ✅ **Quản lý thông tin khách hàng (CIF) tuân thủ đầy đủ**:
+  - Thông tư 40/2024/TT-NHNN về KYC/AML
+  - Nghị định 52/2024/NĐ-CP về thanh toán không dùng tiền mặt
+  - Luật An ninh mạng về bảo vệ dữ liệu cá nhân
+  - 5 cấp độ KYC linh hoạt phù hợp với nhu cầu business
+- ✅ **Customer-centric approach**:
+  - Customer 360° view
+  - Lifecycle management
+  - Seamless onboarding experience
+  - Regulatory compliance by design
 
