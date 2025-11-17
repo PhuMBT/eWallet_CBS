@@ -29,6 +29,7 @@ graph TB
         G[Transaction Service]
         H[Payment Service]
         I[Credit Service]
+        I1[AML Service]
         J1[Notification Service]
     end
     
@@ -60,12 +61,14 @@ graph TB
     E --> G
     E --> H
     E --> I
+    E --> I1
     E --> J1
     
     F --> K
     G --> K
     H --> K
     I --> K
+    I1 --> K
     
     F --> K1
     G --> K1
@@ -81,7 +84,10 @@ graph TB
     
     K1 --> N
     K1 --> O
-    K1 --> T
+    K1 --> I1
+    
+    I1 --> T
+    M --> I1
     
     H --> Q
     H --> R
@@ -141,6 +147,46 @@ Lớp này bao gồm các ứng dụng và kênh tương tác với người dù
 - Tính lãi và phí
 - **Phụ thuộc**: CIF Management (credit profile, risk rating)
 
+#### AML Service (Dịch vụ Anti-Money Laundering)
+
+**Vai trò:** Service chuyên biệt cho AML/KYC screening và compliance checking
+
+**Chức năng chính:**
+- **eKYC Verification**: Xác thực danh tính với Bộ Công an
+  - CCCD/Passport verification
+  - Facial recognition validation
+  - National ID database lookup
+- **AML Screening**: Kiểm tra chống rửa tiền
+  - Sanction list screening (UN, EU, US sanctions)
+  - PEP (Politically Exposed Persons) checking
+  - Watchlist monitoring
+  - Adverse media screening
+- **Risk Assessment**: Đánh giá rủi ro khách hàng
+  - Transaction pattern analysis
+  - Geographic risk scoring
+  - Occupation-based risk
+  - Source of funds verification
+- **Ongoing Monitoring**: Giám sát liên tục
+  - Periodic re-screening
+  - Alert generation for suspicious activities
+  - Regulatory reporting
+- **Compliance Reporting**: Báo cáo tuân thủ
+  - STR (Suspicious Transaction Report)
+  - CTR (Currency Transaction Report)
+  - Audit trail for regulators
+
+**Integration:**
+- **Upstream**: Được gọi bởi CIF Management, Risk Management
+- **Downstream**: Kết nối với Bộ Công an API, AML screening providers
+- **Phụ thuộc**: Core Banking Engine, CIF Management
+
+**Tại sao AML Service ở Application Layer?**
+1. ✅ Xử lý business logic cụ thể (AML screening workflows)
+2. ✅ Integration-heavy service (nhiều external APIs)
+3. ✅ Domain-specific rules và regulations
+4. ✅ Có thể scale độc lập theo nhu cầu screening
+5. ✅ Dễ dàng update khi quy định thay đổi
+
 #### Notification Service (Dịch vụ thông báo)
 - Push notification
 - SMS/Email
@@ -167,15 +213,18 @@ Lớp này bao gồm các ứng dụng và kênh tương tác với người dù
 
 **KYC/KYB & Compliance:**
 - **Customer Onboarding**: Tiếp nhận và xác minh khách hàng mới
-- **KYC/KYB Verification**: Xác thực danh tính (5 cấp độ theo TT 40/2024/TT-NHNN)
+- **KYC Level Management**: Quản lý cấp độ xác thực (5 cấp độ theo TT 40/2024/TT-NHNN)
   - Level 1: User Account (không CIF)
   - Level 2: eKYC cơ bản (tạo CIF, 100M/tháng)
   - Level 3: eKYC nâng cao (500M/tháng)
   - Level 4: Xác thực đầy đủ (không giới hạn)
   - Level 5: Enhanced Merchant (NPP, NBL)
-- **AML Screening**: Kiểm tra danh sách trừng phạt, PEP, watchlist
+- **Compliance Orchestration**: Điều phối các quy trình compliance
+  - Gọi AML Service để screening
+  - Lưu trữ kết quả verification
+  - Quản lý compliance status
 - **Periodic Review**: Xem xét định kỳ theo quy định
-- **Risk Rating**: Xếp hạng rủi ro khách hàng
+- **Risk Rating Storage**: Lưu trữ xếp hạng rủi ro từ AML Service
 
 **Lifecycle Management:**
 - **Active/Dormant**: Quản lý trạng thái hoạt động
@@ -310,7 +359,9 @@ sequenceDiagram
 
 ### Luồng Onboarding Khách hàng (Customer Onboarding với CIF)
 
-**📌 Lưu ý:** CIF Management nằm ở **Core Banking Layer**, Account Service gọi xuống Core Banking Layer để tạo CIF.
+**📌 Lưu ý:** 
+- CIF Management nằm ở **Core Banking Layer** (quản lý master data)
+- AML Service nằm ở **Application Layer** (xử lý screening logic và kết nối external APIs)
 
 ```mermaid
 sequenceDiagram
@@ -319,6 +370,7 @@ sequenceDiagram
     participant ACC as Account Service<br/>(Application)
     participant CORE as Core Banking Engine
     participant CIF as CIF Management<br/>(Core Banking)
+    participant AML as AML Service<br/>(Application)
     participant GOV as Bộ Công an API
     participant DB as Database
     participant N as Notification
@@ -338,11 +390,16 @@ sequenceDiagram
     A->>ACC: KYC verification request
     ACC->>CORE: Request CIF creation
     CORE->>CIF: Create CIF with eKYC
-    CIF->>GOV: Verify ID with National DB
-    GOV-->>CIF: Verified OK
-    CIF->>CIF: AML Screening (Basic)
+    
+    CIF->>AML: Request eKYC verification
+    AML->>GOV: Verify ID with National DB
+    GOV-->>AML: ID verified
+    AML->>AML: Facial recognition check
+    AML->>AML: Basic AML screening
+    AML-->>CIF: Verification result (APPROVED)
+    
     CIF->>CIF: CREATE CIF Record
-    CIF->>DB: Save CIF + Customer Info
+    CIF->>DB: Save CIF + Customer Info + KYC Level 2
     DB-->>CIF: CIF created
     CIF-->>CORE: CIF ID + Level 2
     CORE->>ACC: Create wallet account
@@ -357,14 +414,23 @@ sequenceDiagram
     A->>ACC: Upgrade KYC level
     ACC->>CORE: Request level upgrade
     CORE->>CIF: Upgrade KYC verification
-    CIF->>CIF: Enhanced biometric check
-    CIF->>CIF: Advanced AML screening
+    
+    CIF->>AML: Request enhanced verification
+    AML->>AML: Enhanced biometric check
+    AML->>AML: Advanced AML screening
+    AML->>AML: Risk assessment
+    
     alt Low Risk Customer
+        AML-->>CIF: Risk Score: LOW
+        CIF->>CIF: Update to Level 3
         CIF-->>CORE: Level 3 - 500M/month
     else High Risk - Need Review
-        CIF->>CIF: Manual review process
+        AML-->>CIF: Risk Score: HIGH
+        CIF->>CIF: Trigger manual review
+        CIF->>CIF: After review → Level 4
         CIF-->>CORE: Level 4 - Unlimited
     end
+    
     CORE->>ACC: Update account limits
     ACC->>N: Notify upgrade
     N-->>U: Level upgraded
@@ -378,16 +444,25 @@ User Request
 API Gateway (Authentication/Authorization)
   ↓
 Account Service (Application Layer)
-  ↓                                    ← Application Layer không sở hữu CIF data
-Core Banking Engine                    
-  ↓                                    ← Core Banking Layer quản lý master data
-CIF Management (Core Banking Layer)    
   ↓
-Database
+Core Banking Engine                    
+  ↓
+CIF Management (Core Banking Layer) ───┐
+  │                                     │
+  │ Calls AML Service for screening    │
+  └──────────────────────────────►      │
+                                        ▼
+            AML Service (Application Layer) ◄── Integration-heavy
+                        │
+                        └──────► Bộ Công an API
+                                 (External Integration)
 
-✅ CORRECT: Hierarchical dependency (App → Core → Data)
-✅ CIF Management provides master data to ALL application services
-✅ Single Source of Truth at Core Banking Layer
+✅ CORRECT Architecture:
+  - CIF Management: Master Data at Core Banking Layer
+  - AML Service: Business Logic & Integration at Application Layer
+  - Separation of Concerns: Data management vs Screening logic
+  - CIF calls AML for verification, stores results
+  - AML handles all external API integrations
 ```
 
 ## Bảo mật
@@ -566,6 +641,11 @@ Kiến trúc SDK.Finance được thiết kế theo nguyên tắc **Layered Arch
 - ✅ CONSUME data từ Core Banking Layer
 - ✅ Stateless và dễ scale
 - ✅ Không sở hữu master data
+- ✅ **AML Service**: Chuyên biệt cho screening & external integration
+  - Kết nối Bộ Công an API (eKYC)
+  - AML/sanction screening
+  - Risk assessment
+  - Compliance reporting
 
 **2. Core Banking Layer (Foundation Services & Master Data)**
 - ✅ Quản lý Master Data (CIF, Ledger/COA)
@@ -581,6 +661,11 @@ Kiến trúc SDK.Finance được thiết kế theo nguyên tắc **Layered Arch
   3. Industry best practice (Temenos T24, Oracle FLEXCUBE, Finacle)
   4. Compliance & Security cần centralized control
   5. Loại bỏ circular dependencies
+- 🔄 **Interaction với AML Service**:
+  - CIF Management orchestrates compliance workflow
+  - Gọi AML Service để thực hiện verification & screening
+  - Lưu trữ kết quả verification vào master data
+  - AML Service xử lý integration với external APIs
 - 📄 **Chi tiết phân tích**: `reference-docs/cif-architecture-analysis.md`
 
 ### Lợi ích Kiến trúc
@@ -588,12 +673,22 @@ Kiến trúc SDK.Finance được thiết kế theo nguyên tắc **Layered Arch
 - ✅ **Proper Layered Architecture**: Dependencies flow downward (App → Core)
 - ✅ **No Circular Dependencies**: Application services không phụ thuộc lẫn nhau
 - ✅ **Single Source of Truth**: CIF và Ledger là authoritative sources
+- ✅ **Separation of Concerns**: 
+  - CIF Management (Core): Master data & orchestration
+  - AML Service (App): Screening logic & external integration
+  - Clear responsibility boundaries
 - ✅ **Hiệu năng cao**: Xử lý hàng nghìn giao dịch đồng thời
 - ✅ **Tính sẵn sàng**: Uptime 99.9%
 - ✅ **Bảo mật**: Tuân thủ các tiêu chuẩn bảo mật tài chính quốc tế
-- ✅ **Khả năng mở rộng**: Scale horizontal và vertical
-- ✅ **Dễ dàng bảo trì**: Clear separation of concerns
-- ✅ **Tích hợp linh hoạt**: Dễ dàng tích hợp với các hệ thống khác
+- ✅ **Khả năng mở rộng**: 
+  - Scale horizontal và vertical
+  - AML Service có thể scale độc lập khi nhu cầu screening tăng
+- ✅ **Dễ dàng bảo trì**: 
+  - Clear separation of concerns
+  - AML Service dễ update khi quy định thay đổi
+- ✅ **Tích hợp linh hoạt**: 
+  - Dễ dàng tích hợp với các hệ thống khác
+  - AML Service centralize tất cả external compliance APIs
 - ✅ **Disaster Recovery & High Availability**: Comprehensive backup and failover
 
 ### Regulatory Compliance
