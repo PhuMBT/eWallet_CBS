@@ -261,7 +261,7 @@ function evaluateFraudRisk(aggregatedScore: number): DecisionImpact {
 - PCB credit check (2,000 VNĐ)
 - Kalapa basic fraud check (3,000 VNĐ)
 - **Total**: ~5,000 VNĐ/application
-- **Use for**: Low amount (<10M), existing customers
+- **Use for**: Low amount (&lt;10M), existing customers
 
 **Tier 2 - Standard (Most Cases):**
 - PCB credit check (2,000 VNĐ)
@@ -275,7 +275,7 @@ function evaluateFraudRisk(aggregatedScore: number): DecisionImpact {
 - PCB credit check (2,000 VNĐ)
 - All fraud providers (15,000 VNĐ)
 - **Total**: ~27,000 VNĐ/application
-- **Use for**: Large amount (>100M), manual review
+- **Use for**: Large amount (&gt;100M), manual review
 
 ```typescript
 function selectFraudCheckTier(
