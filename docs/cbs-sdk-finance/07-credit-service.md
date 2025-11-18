@@ -4,6 +4,399 @@
 
 Credit Service trong Core Banking quản lý tài khoản tín dụng sau khi đã được phê duyệt, bao gồm quản lý hạn mức, giải ngân, tính lãi, trả nợ, và giám sát các điều kiện tín dụng. Module này đảm bảo tính chính xác và tuân thủ trong quản lý danh mục tín dụng.
 
+## Quy trình Khởi tạo và Phê duyệt Tín dụng
+
+### Luồng tổng thể từ Yêu cầu đến Giải ngân
+
+Trước khi Credit Service quản lý tài khoản tín dụng, cần có quy trình phê duyệt hạn mức qua **Loan Origination System (LOS)** và **Decision Engine**. Sơ đồ dưới đây mô tả luồng từ yêu cầu khách hàng đến giải ngân:
+
+```mermaid
+graph TD
+    subgraph Frontend & Channel
+        A[Ứng dụng B2B/Ví Masan] -->|1. Yêu cầu Hạn mức/BNPL| B(API Gateway/BFF)
+    end
+
+    subgraph BPM - phê duyệt tín dụng
+        B -->|2. Lấy dữ liệu KH| C[Dịch vụ Quản lý Hồ sơ - LOS]
+        C <-->|3. Gọi dữ liệu phê duyệt| G
+        C -->|4. Lấy Dữ liệu Ngoài| F[API: CIC/PCB/Fraud check]
+        C -->|5. Gửi yêu cầu phê duyệt| E(Dịch vụ Decision Engine - Drools/Python)
+        E -->|6. Trả Quyết định -Approve/Reject/Refer| C
+        C -->|7. Lưu hồ sơ tín dụng, Kết quả phê duyệt | G[Datamart]
+    end
+
+    subgraph Quản lý tín dụng
+        C -->|8. Giải ngân| H(Core Banking)
+    end
+
+    B -->|9. Trả kết quả về App| A
+    
+    %% Định nghĩa luồng chính
+    D(Dịch vụ Dữ liệu Nội bộ/OMS) -.->|Lịch sử mua hàng, công nợ| G
+    H -.->|Dữ liệu tín dụng, tiền gửi, dịch vụ| I
+    G <--> I[Datawharehouse]
+    
+    style A fill:#D4E6F1,stroke:#3498DB,stroke-width:2px
+    style E fill:#F9E79F,stroke:#F39C12,stroke-width:2px
+    style C fill:#D5F5E3,stroke:#2ECC71,stroke-width:2px
+    style H fill:#E8DAEF,stroke:#8E44AD,stroke-width:2px
+```
+
+### Giải thích các bước
+
+**1. Yêu cầu từ Khách hàng (Frontend)**
+- **Ứng dụng B2B/Ví Masan**: NPP hoặc NBL yêu cầu hạn mức tín dụng hoặc BNPL (Buy Now Pay Later)
+- Request được gửi qua **API Gateway/BFF** (Backend for Frontend)
+
+**2-3. Loan Origination System (LOS)**
+- **LOS** nhận yêu cầu và thu thập dữ liệu khách hàng:
+  - Thông tin CIF từ Core Banking
+  - Lịch sử giao dịch từ Datamart
+  - Dữ liệu công nợ hiện tại
+- LOS truy vấn **Datamart** để lấy dữ liệu lịch sử phê duyệt, hồ sơ tín dụng cũ
+
+**4. Lấy Dữ liệu Ngoài (External Data)**
+- **CIC (Credit Information Center)**: Lịch sử tín dụng từ NHNN
+- **PCB (Police Clearance Bureau)**: Kiểm tra lý lịch tư pháp
+- **Fraud Detection API**: Phát hiện gian lận
+- **Financial Data Providers**: Báo cáo tài chính (cho doanh nghiệp)
+
+**5-6. Decision Engine**
+- **Decision Engine** (Drools/Python) xử lý quyết định tín dụng:
+  - Apply business rules (credit policy)
+  - Scoring models (credit score, behavior score)
+  - Risk assessment
+  - Fraud detection
+- **Output**: 
+  - ✅ **APPROVE**: Phê duyệt với hạn mức cụ thể
+  - ❌ **REJECT**: Từ chối
+  - 🔄 **REFER**: Cần review thủ công (manual underwriting)
+
+**7. Lưu trữ Kết quả**
+- **Datamart**: Lưu hồ sơ tín dụng, kết quả phê duyệt, điểm số
+- Tạo audit trail cho compliance
+
+**8. Giải ngân (Core Banking)**
+- Nếu APPROVED → Tạo **Credit Account** trong Core Banking
+- Thực hiện giải ngân (drawdown) theo hạn mức đã phê duyệt
+- **Credit Service** bắt đầu quản lý account lifecycle
+
+**9. Thông báo Khách hàng**
+- Trả kết quả về ứng dụng B2B/Ví Masan
+- Khách hàng nhận thông báo về hạn mức đã được phê duyệt
+
+### Tích hợp Data Sources
+
+**Dữ liệu Nội bộ:**
+- **OMS (Order Management System)**: Lịch sử mua hàng, tần suất đặt hàng
+- **Core Banking**: Số dư tài khoản, lịch sử giao dịch, dịch vụ đang sử dụng
+- **Datamart**: Tổng hợp dữ liệu phê duyệt, hành vi khách hàng
+
+**Dữ liệu Ngoài:**
+- **CIC**: Credit bureau data
+- **PCB**: Background check
+- **Fraud Detection**: External fraud databases
+
+### Use Case: NPP yêu cầu Hạn mức Tín dụng
+
+```typescript
+// 1. NPP gửi yêu cầu qua Ví Masan
+const creditRequest = {
+  customerId: 'NPP_001',
+  customerType: 'B2B_DISTRIBUTOR',
+  requestedAmount: 1_000_000_000,  // 1 tỷ VNĐ
+  purpose: 'WORKING_CAPITAL',
+  requestDate: '2025-01-17'
+};
+
+// 2-3. LOS thu thập dữ liệu
+const customerData = await losService.gatherCustomerData({
+  customerId: 'NPP_001',
+  sources: [
+    'CIF',                    // Customer Information File
+    'TRANSACTION_HISTORY',    // 12 months history
+    'EXISTING_FACILITIES',    // Current credit lines
+    'ORDER_HISTORY'           // OMS data
+  ]
+});
+
+// 4. Lấy dữ liệu external
+const externalData = await Promise.all([
+  cicService.getCreditReport('NPP_001'),        // CIC credit history
+  fraudService.checkFraud('NPP_001'),           // Fraud detection
+  pcbService.getBackgroundCheck('NPP_001')      // Police clearance
+]);
+
+// 5-6. Decision Engine phê duyệt
+const decisionRequest = {
+  customer: customerData,
+  external: externalData,
+  requestedAmount: 1_000_000_000,
+  facilityType: 'REVOLVING_CREDIT'
+};
+
+const decision = await decisionEngine.evaluate(decisionRequest);
+
+// Decision output
+if (decision.status === 'APPROVED') {
+  // 7. Lưu kết quả
+  await datamart.saveCreditDecision({
+    customerId: 'NPP_001',
+    decision: 'APPROVED',
+    approvedAmount: decision.approvedAmount,  // 800M (might be lower than requested)
+    creditScore: decision.creditScore,        // 720/900
+    riskGrade: decision.riskGrade,           // 'A-'
+    approvalDate: new Date(),
+    expiryDate: addMonths(new Date(), 12)
+  });
+  
+  // 8. Giải ngân - Tạo Credit Account trong Core Banking
+  const creditAccount = await coreBanking.createCreditAccount({
+    customerId: 'NPP_001',
+    accountType: 'REVOLVING_CREDIT',
+    facility: {
+      facilityType: 'TRADE_FINANCE',
+      approvedAmount: decision.approvedAmount,
+      currency: 'VND',
+      approvedDate: new Date().toISOString(),
+      expiryDate: addMonths(new Date(), 12).toISOString()
+    },
+    interest: {
+      baseRate: 10,
+      spread: 2,
+      effectiveRate: 12,
+      calculationMethod: 'REDUCING_BALANCE'
+    },
+    status: 'ACTIVE'
+  });
+  
+  // 9. Thông báo khách hàng
+  return {
+    status: 'APPROVED',
+    message: 'Hạn mức tín dụng đã được phê duyệt',
+    approvedAmount: decision.approvedAmount,
+    accountNumber: creditAccount.accountNumber,
+    availableLimit: decision.approvedAmount,
+    interestRate: 12
+  };
+  
+} else if (decision.status === 'REJECT') {
+  return {
+    status: 'REJECTED',
+    reason: decision.rejectReason,
+    message: 'Yêu cầu hạn mức không được phê duyệt'
+  };
+  
+} else if (decision.status === 'REFER') {
+  // Cần manual review
+  await createManualReviewTask({
+    customerId: 'NPP_001',
+    reason: decision.referReason,
+    assignTo: 'CREDIT_TEAM'
+  });
+  
+  return {
+    status: 'PENDING',
+    message: 'Hồ sơ đang được xem xét thủ công',
+    estimatedTime: '24-48 giờ'
+  };
+}
+```
+
+### Decision Engine Rules (Example)
+
+```typescript
+// Credit Policy Rules
+interface CreditPolicyRule {
+  name: string;
+  condition: (data: CustomerData) => boolean;
+  action: 'APPROVE' | 'REJECT' | 'REFER';
+  reason: string;
+}
+
+const creditPolicyRules: CreditPolicyRule[] = [
+  {
+    name: 'MIN_TENURE',
+    condition: (data) => data.customerTenure < 6, // < 6 months
+    action: 'REJECT',
+    reason: 'Khách hàng mới, chưa đủ lịch sử giao dịch'
+  },
+  {
+    name: 'EXISTING_OVERDUE',
+    condition: (data) => data.currentOverdue > 0,
+    action: 'REJECT',
+    reason: 'Có khoản nợ quá hạn chưa thanh toán'
+  },
+  {
+    name: 'CIC_NPL',
+    condition: (data) => data.cicData.hasNPL === true,
+    action: 'REJECT',
+    reason: 'Có nợ xấu tại CIC'
+  },
+  {
+    name: 'HIGH_RISK_FRAUD',
+    condition: (data) => data.fraudScore > 70,
+    action: 'REJECT',
+    reason: 'Nguy cơ gian lận cao'
+  },
+  {
+    name: 'CREDIT_SCORE_LOW',
+    condition: (data) => data.creditScore < 500,
+    action: 'REFER',
+    reason: 'Điểm tín dụng thấp, cần xem xét thủ công'
+  },
+  {
+    name: 'LARGE_AMOUNT',
+    condition: (data) => data.requestedAmount > 5_000_000_000, // > 5 tỷ
+    action: 'REFER',
+    reason: 'Hạn mức lớn, cần phê duyệt cấp cao'
+  },
+  {
+    name: 'AUTO_APPROVE',
+    condition: (data) => 
+      data.creditScore >= 700 &&
+      data.customerTenure >= 12 &&
+      data.requestedAmount <= 2_000_000_000 &&
+      data.currentOverdue === 0,
+    action: 'APPROVE',
+    reason: 'Đủ điều kiện phê duyệt tự động'
+  }
+];
+
+// Apply rules
+function evaluateCreditRequest(data: CustomerData): DecisionResult {
+  for (const rule of creditPolicyRules) {
+    if (rule.condition(data)) {
+      return {
+        status: rule.action,
+        reason: rule.reason,
+        ruleName: rule.name
+      };
+    }
+  }
+  
+  // Default: Refer
+  return {
+    status: 'REFER',
+    reason: 'Không match rule nào, cần manual review'
+  };
+}
+```
+
+### Decision Engine Architecture
+
+```mermaid
+graph LR
+    A[Credit Request] --> B[Data Aggregation]
+    
+    B --> C1[Internal Data]
+    B --> C2[External Data]
+    
+    C1 --> D[Feature Engineering]
+    C2 --> D
+    
+    D --> E1[Rule Engine<br/>Drools]
+    D --> E2[ML Models<br/>Python/Scikit]
+    
+    E1 --> F[Decision Aggregation]
+    E2 --> F
+    
+    F --> G{Final Decision}
+    
+    G -->|APPROVE| H1[Set Credit Limit]
+    G -->|REJECT| H2[Record Reason]
+    G -->|REFER| H3[Create Review Task]
+    
+    style E1 fill:#F9E79F,stroke:#F39C12,stroke-width:2px
+    style E2 fill:#F9E79F,stroke:#F39C12,stroke-width:2px
+    style G fill:#E8DAEF,stroke:#8E44AD,stroke-width:2px
+```
+
+**Components:**
+
+1. **Data Aggregation**
+   - Collect từ internal & external sources
+   - Normalize & validate data
+
+2. **Feature Engineering**
+   - Calculate metrics: DTI (Debt-to-Income), utilization rate, payment history
+   - Create derived features for ML models
+
+3. **Rule Engine (Drools)**
+   - Business rules từ Credit Policy
+   - Hard rules (reject ngay nếu vi phạm)
+   - Soft rules (ảnh hưởng credit limit)
+
+4. **ML Models (Python)**
+   - **Credit Scoring Model**: Dự đoán khả năng trả nợ
+   - **Fraud Detection Model**: Phát hiện gian lận
+   - **Limit Recommendation Model**: Đề xuất hạn mức phù hợp
+
+5. **Decision Aggregation**
+   - Kết hợp kết quả từ rules và models
+   - Apply business logic
+   - Generate final decision + reason
+
+### Integration với Core Banking
+
+Sau khi Decision Engine phê duyệt, **Credit Account** được tạo trong Core Banking:
+
+```mermaid
+sequenceDiagram
+    participant LOS as Loan Origination<br/>System
+    participant DE as Decision Engine
+    participant DM as Datamart
+    participant CB as Core Banking<br/>Credit Service
+    participant LED as Ledger System
+    
+    Note over LOS,LED: Phase 1: Credit Approval
+    
+    LOS->>DE: Submit credit request
+    DE->>DE: Evaluate rules & models
+    DE-->>LOS: Decision: APPROVED (800M)
+    
+    LOS->>DM: Save credit decision
+    
+    Note over LOS,LED: Phase 2: Account Setup
+    
+    LOS->>CB: Create credit account
+    CB->>CB: Validate facility details
+    CB->>LED: Setup GL accounts
+    LED-->>CB: GL accounts created
+    CB-->>LOS: Account created
+    
+    Note over LOS,LED: Phase 3: Drawdown (Giải ngân)
+    
+    LOS->>CB: Request drawdown (500M)
+    CB->>CB: Check available limit
+    CB->>LED: Post drawdown transaction
+    
+    LED->>LED: Dr. Credit Account (Asset)
+    LED->>LED: Cr. Customer Account (Liability)
+    
+    LED-->>CB: Transaction posted
+    CB-->>LOS: Drawdown successful
+    
+    LOS-->>User: Funds disbursed ✅
+```
+
+### Phân biệt LOS và Credit Service
+
+| Aspect | LOS (Loan Origination) | Credit Service (Core Banking) |
+|--------|------------------------|-------------------------------|
+| **Scope** | Phê duyệt & setup | Quản lý lifecycle |
+| **Input** | Credit application | Approved facility |
+| **Process** | Underwriting, scoring, approval | Drawdown, interest, repayment |
+| **Output** | Approved facility | Account balances, transactions |
+| **Timeline** | 1-3 days (one-time) | Ongoing (daily/monthly) |
+| **Users** | Credit team, underwriters | Operations, customers |
+| **Data** | CIC, PCB, financial statements | Account balances, payment history |
+
+**LOS**: "Should we lend?" → Decision  
+**Credit Service**: "How do we manage the loan?" → Execution
+
+---
+
 ## Sơ đồ Tổng quan
 
 ### Các chức năng chính của Credit Service
@@ -465,22 +858,22 @@ async function generateRepaymentSchedule(
       (monthlyRate * Math.pow(1 + monthlyRate, tenorMonths)) /
       (Math.pow(1 + monthlyRate, tenorMonths) - 1);
     
-    let remainingPrincipal = principal;
-    
+  let remainingPrincipal = principal;
+  
     for (let i = 1; i <= tenorMonths; i++) {
       const interestAmount = remainingPrincipal * monthlyRate;
       const principalAmount = emi - interestAmount;
       remainingPrincipal -= principalAmount;
-      
-      schedule.push({
-        installmentNumber: i,
-        dueDate: addMonths(new Date(), i).toISOString(),
+    
+    schedule.push({
+      installmentNumber: i,
+      dueDate: addMonths(new Date(), i).toISOString(),
         principalAmount: Math.round(principalAmount),
         interestAmount: Math.round(interestAmount),
         totalAmount: Math.round(emi),
-        remainingBalance: Math.max(0, Math.round(remainingPrincipal)),
-        status: 'PENDING'
-      });
+      remainingBalance: Math.max(0, Math.round(remainingPrincipal)),
+      status: 'PENDING'
+    });
     }
   } else if (repaymentType === 'BULLET') {
     // Interest only payments, principal at maturity
