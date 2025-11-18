@@ -57,8 +57,8 @@ graph TD
 
 **4. Lấy Dữ liệu Ngoài (External Data)**
 - **CIC (Credit Information Center)**: Lịch sử tín dụng từ NHNN
-- **PCB (Police Clearance Bureau)**: Kiểm tra lý lịch tư pháp
-- **Fraud Detection API**: Phát hiện gian lận
+- **PCB**: Credit bureau (lịch sử tín dụng), API nhanh hơn và chi phí rẻ hơn CIC
+- **Fraud Detection Providers**: JuicyScore, SEON, Kalapa Anti-Fraud, Momo Fraud Score
 - **Financial Data Providers**: Báo cáo tài chính (cho doanh nghiệp)
 
 **5-6. Decision Engine**
@@ -93,9 +93,210 @@ graph TD
 - **Datamart**: Tổng hợp dữ liệu phê duyệt, hành vi khách hàng
 
 **Dữ liệu Ngoài:**
-- **CIC**: Credit bureau data
-- **PCB**: Background check
-- **Fraud Detection**: External fraud databases
+- **CIC**: Credit Information Center (NHNN) - Lịch sử tín dụng
+- **PCB**: Credit bureau - Lịch sử tín dụng (API nhanh hơn, chi phí rẻ hơn CIC)
+- **Fraud Detection Providers**: JuicyScore, SEON, Kalapa Anti-Fraud, Momo Fraud Score
+
+### Credit Bureau Services
+
+**1. CIC (Credit Information Center - NHNN)**
+- **Provider**: Ngân hàng Nhà nước Việt Nam (State Bank of Vietnam)
+- **Data Coverage**: Tất cả tổ chức tín dụng được cấp phép tại VN
+- **Data Points**: 
+  - Lịch sử vay vốn tại các ngân hàng
+  - Lịch sử trả nợ
+  - Nợ xấu (NPL)
+  - Số dư nợ hiện tại
+- **Ưu điểm**: 
+  - Dữ liệu chính thống, đầy đủ nhất
+  - Regulatory compliance
+  - Bắt buộc phải check cho khoản vay lớn
+- **Nhược điểm**:
+  - API chậm (2-5 giây)
+  - Chi phí cao (5,000-10,000 VNĐ/request)
+  - Rate limit thấp
+
+**2. PCB (Credit Bureau)**
+- **Provider**: Công ty tư nhân cung cấp dữ liệu tín dụng
+- **Data Coverage**: Dữ liệu từ nhiều nguồn (banks, fintech, e-commerce)
+- **Data Points**:
+  - Credit history
+  - Payment behavior
+  - Credit utilization
+  - Alternative data (utility bills, telecom)
+- **Ưu điểm**:
+  - ✅ **API nhanh hơn**: < 1 giây response time
+  - ✅ **Chi phí rẻ hơn**: 2,000-5,000 VNĐ/request
+  - ✅ Higher rate limit
+  - ✅ Better developer experience
+  - ✅ Alternative data sources
+- **Nhược điểm**:
+  - Dữ liệu không đầy đủ bằng CIC
+  - Chưa có regulatory mandate
+
+**Best Practice**: 
+- Sử dụng **PCB** cho auto-approval (fast, cheap)
+- Sử dụng **CIC** cho manual review & large amounts (regulatory compliance)
+- Cross-check cả 2 sources cho high-risk cases
+
+### Fraud Detection Services
+
+**1. JuicyScore**
+- **Specialty**: Device intelligence & behavioral biometrics
+- **Features**:
+  - Device fingerprinting (hardware, OS, browser)
+  - IP reputation analysis
+  - Behavioral patterns (typing speed, mouse movement)
+  - Bot detection
+- **API Response**: Fraud score 0-100 (higher = riskier)
+- **Use Case**: Detect synthetic identities, bot attacks
+
+**2. SEON**
+- **Specialty**: Digital footprint analysis
+- **Features**:
+  - Email age & reputation
+  - Phone number validation & carrier lookup
+  - Social media profiles check
+  - IP/Device/Browser analysis
+- **API Response**: Risk score + detailed breakdown
+- **Use Case**: Verify real person vs fake identity
+
+**3. Kalapa Anti-Fraud**
+- **Specialty**: Vietnam-focused fraud detection
+- **Features**:
+  - Local fraud patterns database
+  - ID card OCR + validation
+  - Phone number verification (Vietnam telcos)
+  - Cross-reference với internal blacklist
+- **API Response**: Fraud risk score + reason codes
+- **Use Case**: Vietnam-specific fraud patterns
+
+**4. Momo Fraud Score**
+- **Specialty**: E-wallet transaction fraud
+- **Features**:
+  - Transaction velocity checks
+  - Peer-to-peer payment patterns
+  - Account takeover detection
+  - Momo wallet history (if linked)
+- **API Response**: Fraud risk level (LOW/MEDIUM/HIGH)
+- **Use Case**: BNPL fraud prevention, wallet-based lending
+
+### Fraud Detection Integration Strategy
+
+```typescript
+interface FraudCheckResult {
+  provider: string;
+  score: number;           // 0-100 (higher = riskier)
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  details: {
+    deviceRisk?: number;
+    emailRisk?: number;
+    phoneRisk?: number;
+    ipRisk?: number;
+    behaviorRisk?: number;
+  };
+  flags: string[];         // ['BOT_DETECTED', 'FAKE_EMAIL', etc.]
+}
+
+async function checkFraud(customerId: string): Promise<FraudCheckResult[]> {
+  // Call multiple providers in parallel
+  const [juicyScore, seon, kalapa, momoScore] = await Promise.all([
+    juicyScoreAPI.check(customerId),
+    seonAPI.check(customerId),
+    kalapaAPI.check(customerId),
+    momoAPI.check(customerId)
+  ]);
+  
+  return [juicyScore, seon, kalapa, momoScore];
+}
+
+// Aggregate fraud scores
+function aggregateFraudScore(results: FraudCheckResult[]): number {
+  // Weighted average based on provider reliability
+  const weights = {
+    'JuicyScore': 0.3,    // Device intelligence
+    'SEON': 0.25,         // Digital footprint
+    'Kalapa': 0.3,        // Vietnam-specific
+    'Momo': 0.15          // E-wallet specific
+  };
+  
+  let totalScore = 0;
+  let totalWeight = 0;
+  
+  for (const result of results) {
+    const weight = weights[result.provider] || 0;
+    totalScore += result.score * weight;
+    totalWeight += weight;
+  }
+  
+  return totalScore / totalWeight;
+}
+
+// Apply fraud threshold
+function evaluateFraudRisk(aggregatedScore: number): DecisionImpact {
+  if (aggregatedScore > 70) {
+    return {
+      action: 'REJECT',
+      reason: 'High fraud risk detected'
+    };
+  } else if (aggregatedScore > 40) {
+    return {
+      action: 'REFER',
+      reason: 'Medium fraud risk, manual review required'
+    };
+  } else {
+    return {
+      action: 'APPROVE',
+      reason: 'Low fraud risk'
+    };
+  }
+}
+```
+
+### Cost Optimization: Multi-Provider Strategy
+
+**Tiered Approach:**
+
+**Tier 1 - Fast & Cheap (Auto-Approval):**
+- PCB credit check (2,000 VNĐ)
+- Kalapa basic fraud check (3,000 VNĐ)
+- **Total**: ~5,000 VNĐ/application
+- **Use for**: Low amount (<10M), existing customers
+
+**Tier 2 - Standard (Most Cases):**
+- PCB credit check (2,000 VNĐ)
+- JuicyScore + SEON (5,000 VNĐ each)
+- Kalapa anti-fraud (3,000 VNĐ)
+- **Total**: ~15,000 VNĐ/application
+- **Use for**: Medium amount (10-100M), new customers
+
+**Tier 3 - Comprehensive (High Value):**
+- CIC credit check (10,000 VNĐ)
+- PCB credit check (2,000 VNĐ)
+- All fraud providers (15,000 VNĐ)
+- **Total**: ~27,000 VNĐ/application
+- **Use for**: Large amount (>100M), manual review
+
+```typescript
+function selectFraudCheckTier(
+  amount: number,
+  customerTenure: number
+): 'TIER_1' | 'TIER_2' | 'TIER_3' {
+  
+  // Tier 1: Existing customers, small amount
+  if (customerTenure >= 12 && amount <= 10_000_000) {
+    return 'TIER_1';
+  }
+  
+  // Tier 3: Large amount or new customers with large request
+  if (amount > 100_000_000 || (customerTenure < 6 && amount > 50_000_000)) {
+    return 'TIER_3';
+  }
+  
+  // Tier 2: Default
+  return 'TIER_2';
+}
+```
 
 ### Use Case: NPP yêu cầu Hạn mức Tín dụng
 
@@ -122,9 +323,9 @@ const customerData = await losService.gatherCustomerData({
 
 // 4. Lấy dữ liệu external
 const externalData = await Promise.all([
-  cicService.getCreditReport('NPP_001'),        // CIC credit history
-  fraudService.checkFraud('NPP_001'),           // Fraud detection
-  pcbService.getBackgroundCheck('NPP_001')      // Police clearance
+  cicService.getCreditReport('NPP_001'),        // CIC credit history (NHNN)
+  pcbService.getCreditReport('NPP_001'),        // PCB credit history (faster, cheaper)
+  fraudService.checkFraud('NPP_001')            // Fraud detection (JuicyScore/SEON/Kalapa/Momo)
 ]);
 
 // 5-6. Decision Engine phê duyệt
@@ -329,7 +530,10 @@ graph LR
 
 4. **ML Models (Python)**
    - **Credit Scoring Model**: Dự đoán khả năng trả nợ
-   - **Fraud Detection Model**: Phát hiện gian lận
+   - **Fraud Detection Models**: JuicyScore, SEON, Kalapa Anti-Fraud, Momo Fraud Score
+     - Device fingerprinting
+     - Behavioral analysis
+     - Fraud score aggregation
    - **Limit Recommendation Model**: Đề xuất hạn mức phù hợp
 
 5. **Decision Aggregation**
@@ -390,7 +594,7 @@ sequenceDiagram
 | **Output** | Approved facility | Account balances, transactions |
 | **Timeline** | 1-3 days (one-time) | Ongoing (daily/monthly) |
 | **Users** | Credit team, underwriters | Operations, customers |
-| **Data** | CIC, PCB, financial statements | Account balances, payment history |
+| **Data** | CIC, PCB, fraud scores, financial statements | Account balances, payment history |
 
 **LOS**: "Should we lend?" → Decision  
 **Credit Service**: "How do we manage the loan?" → Execution
