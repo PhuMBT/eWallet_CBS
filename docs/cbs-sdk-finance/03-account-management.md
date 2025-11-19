@@ -48,6 +48,115 @@ Một khách hàng có thể có nhiều tài khoản:
 - Tài khoản thanh toán của merchant
 - Tài khoản vãng lai của doanh nghiệp
 
+#### Overdraft (Thấu chi) - Integration với Credit Service
+
+**⚠️ QUAN TRỌNG:** Overdraft là **credit facility**, được quản lý bởi **Credit Service** (module 07).
+
+**Account Management** chỉ có trách nhiệm:
+- ✅ **EXECUTE** transactions (thực thi giao dịch)
+- ✅ **ENFORCE** overdraft limit (kiểm tra hạn mức)
+- ✅ **TRACK** overdraft usage (theo dõi sử dụng)
+- ✅ **REPORT** usage to Credit Service (báo cáo sử dụng)
+- ❌ **KHÔNG** approve overdraft facility
+- ❌ **KHÔNG** set overdraft limit
+- ❌ **KHÔNG** calculate interest
+
+**Cơ chế hoạt động:**
+
+```mermaid
+sequenceDiagram
+    participant CR as Credit Service
+    participant AM as Account Management
+    participant C as Customer
+    
+    Note over CR,C: 1. Khởi tạo Overdraft
+    C->>CR: Apply overdraft (50M)
+    CR->>CR: Credit approval process
+    CR->>AM: Enable overdraft on account
+    AM->>AM: Update overdraft settings (READ-ONLY)
+    
+    Note over CR,C: 2. Transaction sử dụng Overdraft
+    C->>AM: Transfer 60M (balance = 20M)
+    AM->>AM: Check: 20M + overdraft(50M) ≥ 60M ✓
+    AM->>AM: Execute: Balance = 20M - 60M = -40M
+    AM->>AM: Track: Overdraft used = 40M
+    AM->>CR: Report usage (40M / 50M = 80%)
+    
+    Note over CR,C: 3. Tính lãi (Credit Service)
+    CR->>CR: Daily accrual (18%/year on 40M)
+    CR->>AM: Charge interest (monthly)
+    
+    Note over CR,C: 4. Repayment
+    C->>AM: Deposit 50M
+    AM->>AM: Balance = -40M + 50M = +10M
+    AM->>AM: Overdraft cleared (used = 0)
+    AM->>CR: Report repayment
+```
+
+**Ví dụ Transaction Logic:**
+
+```typescript
+// Account Management - Transaction Validation
+async function validateDebit(
+  accountId: string, 
+  amount: number
+): Promise<{ allowed: boolean; reason?: string }> {
+  
+  const account = await getAccount(accountId);
+  
+  // Calculate total available
+  const availableBalance = account.balance.available;
+  const overdraftAvailable = account.overdraft.enabled 
+    ? account.overdraft.available 
+    : 0;
+  
+  const totalAvailable = availableBalance + overdraftAvailable;
+  
+  if (amount <= totalAvailable) {
+    return { allowed: true };
+  } else {
+    return { 
+      allowed: false, 
+      reason: `Insufficient funds. Available: ${availableBalance}, Overdraft: ${overdraftAvailable}, Required: ${amount}`
+    };
+  }
+}
+
+// Execute debit and track overdraft usage
+async function executeDebit(accountId: string, amount: number): Promise<void> {
+  const account = await getAccount(accountId);
+  const newBalance = account.balance.available - amount;
+  
+  await db.transaction(async (trx) => {
+    // Update balance
+    await trx('accounts')
+      .where('accountId', accountId)
+      .update({ 'balance.available': newBalance });
+    
+    // If balance goes negative, update overdraft tracking
+    if (newBalance < 0) {
+      const overdraftUsed = Math.abs(newBalance);
+      
+      await trx('accounts')
+        .where('accountId', accountId)
+        .update({
+          'overdraft.used': overdraftUsed,
+          'overdraft.available': account.overdraft.limit - overdraftUsed
+        });
+      
+      // Report to Credit Service (async, non-blocking)
+      await creditServiceAPI.reportOverdraftUsage({
+        facilityId: account.overdraft.facilityId,
+        amountUsed: overdraftUsed,
+        utilizationPercentage: (overdraftUsed / account.overdraft.limit) * 100
+      });
+    }
+  });
+}
+```
+
+**📖 Chi tiết đầy đủ:** Xem `reference-docs/overdraft-integration.md` để hiểu rõ cơ chế tích hợp giữa Account Management và Credit Service.
+
 **Ví dụ:**
 ```typescript
 interface CurrentAccount {
@@ -71,10 +180,15 @@ interface CurrentAccount {
   };
   
   // Current account specific
+  // ⚠️ IMPORTANT: Overdraft settings are READ-ONLY, managed by Credit Service
   overdraft: {
-    enabled: boolean;
-    limit: number;            // Hạn mức thấu chi
-    interestRate: number;     // Lãi suất thấu chi (cao hơn nhiều)
+    enabled: boolean;         // Controlled by Credit Service
+    facilityId: string;       // Link to overdraft facility in Credit Service
+    limit: number;            // Synced from Credit Service (READ-ONLY)
+    used: number;             // Tracked by Account Management
+    available: number;        // = limit - used
+    interestRate: number;     // Synced from Credit Service (READ-ONLY)
+    lastSyncedAt: string;     // Last sync time with Credit Service
   };
   
   // Fees

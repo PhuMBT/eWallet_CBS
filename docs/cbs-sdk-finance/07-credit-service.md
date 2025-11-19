@@ -959,6 +959,512 @@ async function processOverdraftInterest(
 }
 ```
 
+#### Overdraft Facility Management & Integration
+
+**⚠️ QUAN TRỌNG:** Overdraft được quản lý bởi **Credit Service**, nhưng thực thi giao dịch (execute transactions) ở **Account Management**.
+
+**Separation of Concerns:**
+
+| Responsibility | Credit Service (Module 07) | Account Management (Module 03) |
+|----------------|----------------------------|--------------------------------|
+| **Approve** facility | ✅ Owns approval process | ❌ No approval authority |
+| **Set** limit | ✅ Sets & modifies limit | ❌ READ-ONLY limit |
+| **Calculate** interest | ✅ Daily accrual & charge | ❌ No interest calculation |
+| **Monitor** risk | ✅ Utilization, delinquency | ❌ No risk monitoring |
+| **Execute** transactions | ❌ No transaction execution | ✅ Debit/credit operations |
+| **Enforce** limit | ❌ No transaction validation | ✅ Check limit on transaction |
+| **Track** usage | 🔄 Receives usage reports | ✅ Tracks overdraft usage |
+
+**Complete Integration Flow:**
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant APP as App/Portal
+    participant CR as Credit Service
+    participant DS as Decision Engine
+    participant AM as Account Management
+    participant LED as Ledger
+    participant N as Notification
+    
+    Note over C,N: Phase 1: Overdraft Application & Approval
+    
+    C->>APP: Apply overdraft (50M VND)
+    APP->>CR: Create overdraft application
+    
+    CR->>CR: Get customer CIF & credit history
+    CR->>DS: Evaluate creditworthiness
+    DS->>DS: Check: Credit score, income, DTI ratio
+    
+    alt Approved
+        DS-->>CR: Approved (limit: 50M, rate: 18%)
+        CR->>CR: Create overdraft facility
+        
+        Note over CR,AM: Phase 2: Link to Current Account
+        
+        CR->>AM: Enable overdraft on account
+        AM->>AM: Update overdraft settings (READ-ONLY)
+        
+        CR->>N: Send approval notification
+        N-->>C: Overdraft approved (50M, 18%/year)
+        
+    else Rejected
+        DS-->>CR: Rejected (low credit score)
+        CR->>N: Send rejection
+        N-->>C: Application rejected
+    end
+    
+    Note over C,N: Phase 3: Transaction using Overdraft
+    
+    C->>APP: Transfer 60M (balance = 20M)
+    APP->>AM: Process transaction
+    
+    AM->>AM: Validate: 20M + overdraft(50M) ≥ 60M ✓
+    AM->>LED: Debit 60M (allow negative)
+    LED->>LED: Balance: 20M - 60M = -40M
+    
+    AM->>AM: Track overdraft usage: 40M
+    AM->>CR: Report usage (80% utilization)
+    
+    CR->>CR: Monitor risk (high utilization alert)
+    
+    AM-->>APP: Transaction completed
+    APP->>N: Notify customer
+    N-->>C: Transfer successful (Overdraft: 40M/50M)
+    
+    Note over C,N: Phase 4: Interest Accrual (Daily EOD)
+    
+    loop Daily
+        CR->>CR: Calculate daily interest (18%/365 on 40M)
+        CR->>CR: Create accrual entry (19,726 VND)
+    end
+    
+    Note over C,N: Phase 5: Monthly Interest Charge
+    
+    CR->>LED: Charge monthly interest
+    LED->>LED: Balance: -40M - 600K = -40.6M
+    AM->>AM: Update overdraft used: 40.6M
+    
+    CR->>N: Interest charged notification
+    N-->>C: Interest: 600K (18%/year)
+```
+
+**Overdraft Facility Data Model:**
+
+```typescript
+// Credit Service - Owns this data
+interface OverdraftFacility {
+  facilityId: string;
+  accountId: string;              // Link to current account (Account Management)
+  cifNumber: string;
+  
+  // Credit approval
+  approvedLimit: number;          // Hạn mức được duyệt
+  currentLimit: number;           // Hạn mức hiện tại (có thể điều chỉnh)
+  
+  // Interest
+  interestRate: number;           // VD: 18%/năm
+  interestCalculationMethod: 'DAILY' | 'MONTHLY';
+  totalInterestCharged: number;   // Tổng lãi đã tính
+  
+  // Risk monitoring
+  creditScore: number;
+  riskRating: 'LOW' | 'MEDIUM' | 'HIGH';
+  utilizationPercentage: number;  // % hạn mức đang dùng
+  
+  // Lifecycle
+  approvedDate: string;
+  expiryDate: string;
+  reviewDate: string;             // Ngày xem xét lại hạn mức
+  status: 'ACTIVE' | 'SUSPENDED' | 'EXPIRED' | 'CLOSED';
+  
+  // Fees
+  fees: {
+    setupFee: number;
+    annualFee: number;
+    overLimitFee?: number;
+  };
+  
+  // Audit
+  lastUsedDate: string;
+  lastReviewedDate: string;
+  lastSyncedWithAccountAt: string;
+}
+```
+
+**API Examples:**
+
+**1. Apply Overdraft (Credit Service)**
+```typescript
+POST /api/v1/credit/overdraft/apply
+Body: {
+  cifNumber: "CIF123456",
+  accountId: "ACC001",
+  requestedLimit: 50_000_000,
+  purpose: "Working capital",
+  requestedTerm: 12  // months
+}
+
+Response: {
+  applicationId: "APP123",
+  status: "PENDING",
+  estimatedDecision: "2025-01-20"
+}
+```
+
+**2. Approve Overdraft (Credit Service - after Decision Engine)**
+```typescript
+async function approveOverdraft(
+  applicationId: string,
+  approvedLimit: number,
+  interestRate: number
+): Promise<OverdraftFacility> {
+  
+  // Create facility
+  const facility = await createFacility({
+    facilityId: generateFacilityId(),
+    accountId: application.accountId,
+    cifNumber: application.cifNumber,
+    approvedLimit: approvedLimit,
+    currentLimit: approvedLimit,
+    interestRate: interestRate,
+    status: 'ACTIVE',
+    approvedDate: new Date(),
+    expiryDate: addMonths(new Date(), application.requestedTerm),
+    reviewDate: addMonths(new Date(), 6)  // Review every 6 months
+  });
+  
+  // Enable overdraft in Account Management
+  await accountManagementAPI.enableOverdraft({
+    accountId: application.accountId,
+    facilityId: facility.facilityId,
+    limit: approvedLimit,
+    interestRate: interestRate
+  });
+  
+  // Send notification
+  await sendNotification({
+    customerId: application.cifNumber,
+    type: 'OVERDRAFT_APPROVED',
+    data: {
+      limit: approvedLimit,
+      rate: interestRate,
+      expiryDate: facility.expiryDate
+    }
+  });
+  
+  return facility;
+}
+```
+
+**3. Daily Interest Accrual (Credit Service - EOD Job)**
+```typescript
+async function accrueOverdraftInterest(): Promise<void> {
+  // Get all active overdraft facilities with usage > 0
+  const facilities = await getActiveOverdraftFacilities({
+    status: 'ACTIVE',
+    utilizationAmount: { $gt: 0 }
+  });
+  
+  for (const facility of facilities) {
+    try {
+      // Get current overdraft balance from Account Management
+      const account = await accountManagementAPI.getAccount(facility.accountId);
+      const overdraftUsed = account.overdraft.used;
+      
+      if (overdraftUsed <= 0) continue;
+      
+      // Calculate daily interest
+      const annualRate = facility.interestRate / 100;
+      const dailyRate = annualRate / 365;
+      const interestAmount = overdraftUsed * dailyRate;
+      
+      // Create accrual entry
+      await createInterestAccrual({
+        facilityId: facility.facilityId,
+        accountId: facility.accountId,
+        accrualDate: today(),
+        principalAmount: overdraftUsed,
+        annualRate: facility.interestRate,
+        dailyRate: dailyRate,
+        interestAmount: interestAmount
+      });
+      
+      // Update facility
+      await updateFacility(facility.facilityId, {
+        totalInterestCharged: facility.totalInterestCharged + interestAmount,
+        lastInterestAccrualDate: today()
+      });
+      
+      console.log(`Accrued ${interestAmount} VND for facility ${facility.facilityId}`);
+      
+    } catch (error) {
+      console.error(`Failed to accrue interest for ${facility.facilityId}:`, error);
+    }
+  }
+}
+```
+
+**4. Monthly Interest Charge (Credit Service)**
+```typescript
+async function chargeMonthlyOverdraftInterest(): Promise<void> {
+  const facilities = await getActiveOverdraftFacilities();
+  
+  for (const facility of facilities) {
+    // Get accumulated interest for the month
+    const monthlyInterest = await getAccruedInterest({
+      facilityId: facility.facilityId,
+      period: 'THIS_MONTH'
+    });
+    
+    if (monthlyInterest <= 0) continue;
+    
+    // Charge interest via Ledger
+    await ledgerAPI.createTransaction({
+      accountId: facility.accountId,
+      type: 'DEBIT',
+      amount: monthlyInterest,
+      description: 'Overdraft interest charge',
+      reference: `INT-${facility.facilityId}-${getMonthKey()}`
+    });
+    
+    // Notify Account Management to update overdraft usage
+    await accountManagementAPI.addToOverdraftUsage({
+      accountId: facility.accountId,
+      amount: monthlyInterest
+    });
+    
+    // Send notification
+    await sendNotification({
+      customerId: facility.cifNumber,
+      type: 'OVERDRAFT_INTEREST_CHARGED',
+      data: {
+        amount: monthlyInterest,
+        period: getMonthKey(),
+        rate: facility.interestRate,
+        newOutstanding: await getOverdraftUsage(facility.accountId)
+      }
+    });
+  }
+}
+```
+
+**5. Receive Usage Reports from Account Management**
+```typescript
+// Credit Service API endpoint called by Account Management
+POST /api/v1/credit/overdraft/report-usage
+Body: {
+  facilityId: "OD123",
+  accountId: "ACC001",
+  amountUsed: 40_000_000,
+  utilizationPercentage: 80
+}
+
+async function handleUsageReport(report: UsageReport): Promise<void> {
+  const facility = await getFacility(report.facilityId);
+  
+  // Update utilization
+  await updateFacility(report.facilityId, {
+    utilizationPercentage: report.utilizationPercentage,
+    lastUsedDate: new Date()
+  });
+  
+  // Monitor for high utilization
+  if (report.utilizationPercentage > 80) {
+    await createRiskAlert({
+      facilityId: report.facilityId,
+      alertType: 'HIGH_UTILIZATION',
+      severity: 'WARNING',
+      details: `Overdraft utilization at ${report.utilizationPercentage}%`
+    });
+  }
+  
+  // Monitor for exceeded limit
+  if (report.amountUsed > facility.currentLimit) {
+    await createRiskAlert({
+      facilityId: report.facilityId,
+      alertType: 'LIMIT_EXCEEDED',
+      severity: 'CRITICAL',
+      details: `Overdraft exceeded limit by ${report.amountUsed - facility.currentLimit}`
+    });
+  }
+}
+```
+
+**6. Update Overdraft Limit (Credit Service)**
+```typescript
+async function updateOverdraftLimit(
+  facilityId: string,
+  newLimit: number,
+  reason: string
+): Promise<void> {
+  
+  const facility = await getFacility(facilityId);
+  
+  // Update facility
+  await updateFacility(facilityId, {
+    currentLimit: newLimit,
+    lastReviewedDate: new Date()
+  });
+  
+  // Sync to Account Management
+  await accountManagementAPI.updateOverdraftLimit({
+    accountId: facility.accountId,
+    facilityId: facilityId,
+    limit: newLimit
+  });
+  
+  // Audit log
+  await createAuditLog({
+    facilityId: facilityId,
+    action: 'LIMIT_CHANGED',
+    oldLimit: facility.currentLimit,
+    newLimit: newLimit,
+    reason: reason
+  });
+  
+  // Notify customer
+  await sendNotification({
+    customerId: facility.cifNumber,
+    type: 'OVERDRAFT_LIMIT_CHANGED',
+    data: {
+      oldLimit: facility.currentLimit,
+      newLimit: newLimit,
+      reason: reason
+    }
+  });
+}
+```
+
+**7. Suspend Overdraft (Credit Service)**
+```typescript
+async function suspendOverdraft(
+  facilityId: string,
+  reason: 'DELINQUENCY' | 'RISK_ALERT' | 'CUSTOMER_REQUEST' | 'CREDIT_REVIEW'
+): Promise<void> {
+  
+  const facility = await getFacility(facilityId);
+  
+  // Update facility status
+  await updateFacility(facilityId, {
+    status: 'SUSPENDED',
+    suspensionReason: reason,
+    suspendedDate: new Date()
+  });
+  
+  // Disable overdraft in Account Management
+  // Account will no longer allow negative balance
+  await accountManagementAPI.disableOverdraft({
+    accountId: facility.accountId,
+    facilityId: facilityId
+  });
+  
+  // Create alert
+  await createRiskAlert({
+    facilityId: facilityId,
+    alertType: 'FACILITY_SUSPENDED',
+    severity: 'HIGH',
+    reason: reason
+  });
+  
+  // Notify customer
+  await sendNotification({
+    customerId: facility.cifNumber,
+    type: 'OVERDRAFT_SUSPENDED',
+    data: {
+      reason: reason,
+      outstandingBalance: await getOverdraftUsage(facility.accountId),
+      actionRequired: 'Please contact support'
+    }
+  });
+}
+```
+
+**Monitoring & Risk Management:**
+
+```typescript
+interface OverdraftRiskMetrics {
+  // Portfolio metrics
+  totalFacilities: number;
+  totalApprovedLimit: number;
+  totalUtilization: number;
+  averageUtilizationPercentage: number;
+  
+  // Risk distribution
+  facilitiesByRisk: {
+    low: number;
+    medium: number;
+    high: number;
+  };
+  
+  // Utilization alerts
+  facilitiesOver50Percent: number;
+  facilitiesOver80Percent: number;
+  facilitiesOver100Percent: number;  // Exceeded limit
+  
+  // Income
+  totalInterestIncome: number;
+  projectedMonthlyIncome: number;
+  
+  // Problem accounts
+  suspendedFacilities: number;
+  expiringSoon: number;  // Within 30 days
+}
+
+// Alert rules
+async function monitorOverdraftRisk(): Promise<void> {
+  const facilities = await getAllOverdraftFacilities();
+  
+  for (const facility of facilities) {
+    // High utilization alert
+    if (facility.utilizationPercentage > 80 && facility.utilizationPercentage <= 100) {
+      await createAlert({
+        type: 'HIGH_UTILIZATION',
+        severity: 'WARNING',
+        facilityId: facility.facilityId,
+        message: `Utilization at ${facility.utilizationPercentage}%`
+      });
+    }
+    
+    // Exceeded limit alert
+    if (facility.utilizationPercentage > 100) {
+      await createAlert({
+        type: 'LIMIT_EXCEEDED',
+        severity: 'CRITICAL',
+        facilityId: facility.facilityId,
+        message: `Exceeded limit by ${facility.utilizationPercentage - 100}%`
+      });
+    }
+    
+    // Expiry approaching
+    const daysToExpiry = daysBetween(new Date(), new Date(facility.expiryDate));
+    if (daysToExpiry <= 30 && daysToExpiry > 0) {
+      await createAlert({
+        type: 'EXPIRY_APPROACHING',
+        severity: 'INFO',
+        facilityId: facility.facilityId,
+        message: `Facility expires in ${daysToExpiry} days`
+      });
+    }
+    
+    // Review due
+    const daysToReview = daysBetween(new Date(), new Date(facility.reviewDate));
+    if (daysToReview <= 7) {
+      await createAlert({
+        type: 'REVIEW_DUE',
+        severity: 'INFO',
+        facilityId: facility.facilityId,
+        message: `Credit review due in ${daysToReview} days`
+      });
+    }
+  }
+}
+```
+
+**📖 Chi tiết đầy đủ:** Xem `reference-docs/overdraft-integration.md` để hiểu rõ hơn về cơ chế tích hợp, data synchronization, và best practices.
+
+---
+
 ### 2. Revolving Credit (Tín dụng tuần hoàn)
 
 ```typescript
