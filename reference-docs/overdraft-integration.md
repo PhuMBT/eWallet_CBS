@@ -550,6 +550,613 @@ async function suspendOverdraft(
 }
 ```
 
+### 3. Overdraft Balance Sync (Cập nhật Dư nợ Thấu chi)
+
+**⚠️ QUAN TRỌNG:** Đây là cơ chế **QUAN TRỌNG NHẤT** để đảm bảo Credit Service luôn có thông tin chính xác về dư nợ thấu chi.
+
+#### Nguyên tắc Ownership
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ BALANCE OWNERSHIP (Single Source of Truth)             │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│ Account Management (Master Data):                      │
+│   ✅ OWNS current account balance (real-time)          │
+│   ✅ OWNS overdraft.used (real-time)                   │
+│   ✅ Calculates: overdraft.available = limit - used    │
+│                                                         │
+│ Credit Service (Monitoring & Interest):                │
+│   🔄 RECEIVES balance updates from Account Mgmt        │
+│   🔄 STORES utilizationAmount (snapshot for monitoring)│
+│   ✅ USES for interest calculation                     │
+│   ✅ USES for risk monitoring                          │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Single Source of Truth:** Account Management owns balance, Credit Service monitors it.
+
+---
+
+#### Scenario A: Transaction Increases Overdraft (Debit)
+
+**Example:** Customer transfers 60M, balance = 20M → overdraft usage increases by 40M
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant AM as Account Management
+    participant LED as Ledger
+    participant CR as Credit Service
+    participant DB_AM as Account DB
+    participant DB_CR as Credit DB
+    
+    C->>AM: Transfer 60M (balance = 20M)
+    
+    Note over AM,LED: Phase 1: Execute Transaction (Atomic)
+    
+    AM->>AM: Validate: 20M + overdraft(50M) ≥ 60M ✓
+    
+    AM->>LED: BEGIN TRANSACTION
+    LED->>LED: Debit 60M from account
+    LED->>LED: Balance: 20M - 60M = -40M
+    LED->>DB_AM: Update account balance = -40M
+    LED->>DB_AM: Update overdraft.used = 40M
+    LED->>DB_AM: Update overdraft.available = 50M - 40M = 10M
+    LED->>AM: COMMIT TRANSACTION
+    
+    Note over AM,CR: Phase 2: Sync to Credit Service (Async, Non-blocking)
+    
+    AM->>CR: POST /api/v1/credit/overdraft/sync-balance
+    Note over AM,CR: Body: {<br/>  facilityId: "OD123",<br/>  accountId: "ACC001",<br/>  currentBalance: -40_000_000,<br/>  overdraftUsed: 40_000_000,<br/>  transactionId: "TXN456",<br/>  timestamp: "2025-01-17T10:30:00Z"<br/>}
+    
+    CR->>DB_CR: Update facility.utilizationAmount = 40M
+    CR->>DB_CR: Update facility.utilizationPercentage = 80%
+    CR->>DB_CR: Update facility.lastUsedDate = today
+    
+    Note over CR: Monitor for alerts
+    CR->>CR: Check if utilization > 80% → Alert
+    
+    CR-->>AM: 200 OK (sync successful)
+    
+    AM-->>C: Transfer completed
+```
+
+**Code Implementation:**
+
+```typescript
+// Account Management - After transaction execution
+async function executeDebit(accountId: string, amount: number): Promise<void> {
+  const account = await getAccount(accountId);
+  
+  await db.transaction(async (trx) => {
+    // Calculate new balance
+    const newBalance = account.balance.available - amount;
+    
+    // Update balance in Account Management (MASTER)
+    await trx('accounts')
+      .where('accountId', accountId)
+      .update({ 
+        'balance.available': newBalance,
+        'balance.total': newBalance  // Assuming no pending/reserved for simplicity
+      });
+    
+    // If balance goes negative, update overdraft tracking
+    if (newBalance < 0) {
+      const overdraftUsed = Math.abs(newBalance);
+      const overdraftAvailable = account.overdraft.limit - overdraftUsed;
+      
+      await trx('accounts')
+        .where('accountId', accountId)
+        .update({
+          'overdraft.used': overdraftUsed,
+          'overdraft.available': overdraftAvailable,
+          'overdraft.lastUsedDate': new Date()
+        });
+    } else {
+      // Balance is positive, no overdraft used
+      await trx('accounts')
+        .where('accountId', accountId)
+        .update({
+          'overdraft.used': 0,
+          'overdraft.available': account.overdraft.limit
+        });
+    }
+    
+    // Create transaction record
+    await trx('transactions').insert({
+      transactionId: generateTransactionId(),
+      accountId: accountId,
+      type: 'DEBIT',
+      amount: amount,
+      balanceAfter: newBalance,
+      timestamp: new Date()
+    });
+  });
+  
+  // CRITICAL: Sync to Credit Service (async, non-blocking)
+  // Don't wait for this - transaction already committed
+  syncBalanceToCreditService(accountId).catch(error => {
+    console.error('Failed to sync balance to Credit Service:', error);
+    // Queue for retry
+    queueBalanceSyncRetry(accountId);
+  });
+}
+
+// Sync balance to Credit Service (async)
+async function syncBalanceToCreditService(accountId: string): Promise<void> {
+  const account = await getAccount(accountId);
+  
+  if (!account.overdraft.enabled) {
+    return; // No overdraft facility
+  }
+  
+  try {
+    await creditServiceAPI.syncOverdraftBalance({
+      facilityId: account.overdraft.facilityId,
+      accountId: accountId,
+      currentBalance: account.balance.available,
+      overdraftUsed: account.overdraft.used,
+      overdraftAvailable: account.overdraft.available,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Update last synced time
+    await updateAccount(accountId, {
+      'overdraft.lastSyncedAt': new Date()
+    });
+    
+  } catch (error) {
+    console.error(`Failed to sync balance for account ${accountId}:`, error);
+    throw error;
+  }
+}
+```
+
+```typescript
+// Credit Service - Receive balance sync
+POST /api/v1/credit/overdraft/sync-balance
+
+interface SyncBalanceRequest {
+  facilityId: string;
+  accountId: string;
+  currentBalance: number;        // Account balance (can be negative)
+  overdraftUsed: number;         // Absolute value of overdraft usage
+  overdraftAvailable: number;    // Remaining overdraft limit
+  transactionId?: string;
+  timestamp: string;
+}
+
+async function handleBalanceSync(request: SyncBalanceRequest): Promise<void> {
+  const facility = await getFacility(request.facilityId);
+  
+  if (!facility) {
+    throw new Error(`Facility ${request.facilityId} not found`);
+  }
+  
+  // Validate
+  if (request.overdraftUsed < 0) {
+    throw new Error('Overdraft used cannot be negative');
+  }
+  
+  // Calculate utilization percentage
+  const utilizationPercentage = facility.currentLimit > 0
+    ? (request.overdraftUsed / facility.currentLimit) * 100
+    : 0;
+  
+  // Update facility (Credit Service data)
+  await updateFacility(request.facilityId, {
+    utilizationAmount: request.overdraftUsed,
+    utilizationPercentage: utilizationPercentage,
+    availableLimit: request.overdraftAvailable,
+    lastUsedDate: request.overdraftUsed > 0 ? new Date() : facility.lastUsedDate,
+    lastBalanceSyncAt: new Date()
+  });
+  
+  // Create balance snapshot (for audit trail)
+  await createBalanceSnapshot({
+    facilityId: request.facilityId,
+    accountId: request.accountId,
+    accountBalance: request.currentBalance,
+    overdraftUsed: request.overdraftUsed,
+    overdraftAvailable: request.overdraftAvailable,
+    utilizationPercentage: utilizationPercentage,
+    transactionId: request.transactionId,
+    timestamp: request.timestamp
+  });
+  
+  // Risk monitoring
+  await monitorUtilization(request.facilityId, utilizationPercentage);
+}
+
+async function monitorUtilization(
+  facilityId: string, 
+  utilizationPercentage: number
+): Promise<void> {
+  
+  // High utilization alert (>80%)
+  if (utilizationPercentage > 80 && utilizationPercentage <= 100) {
+    await createRiskAlert({
+      facilityId: facilityId,
+      alertType: 'HIGH_UTILIZATION',
+      severity: 'WARNING',
+      utilizationPercentage: utilizationPercentage,
+      message: `Overdraft utilization at ${utilizationPercentage.toFixed(2)}%`
+    });
+  }
+  
+  // Exceeded limit alert (>100%)
+  if (utilizationPercentage > 100) {
+    await createRiskAlert({
+      facilityId: facilityId,
+      alertType: 'LIMIT_EXCEEDED',
+      severity: 'CRITICAL',
+      utilizationPercentage: utilizationPercentage,
+      message: `Overdraft exceeded limit by ${(utilizationPercentage - 100).toFixed(2)}%`
+    });
+    
+    // Auto-suspend if exceeded by more than 10%
+    if (utilizationPercentage > 110) {
+      await suspendOverdraft(facilityId, 'LIMIT_EXCEEDED');
+    }
+  }
+  
+  // Cleared overdraft (utilization = 0%)
+  if (utilizationPercentage === 0) {
+    await createEvent({
+      facilityId: facilityId,
+      eventType: 'OVERDRAFT_CLEARED',
+      message: 'Overdraft fully repaid'
+    });
+  }
+}
+```
+
+---
+
+#### Scenario B: Repayment Decreases Overdraft (Credit)
+
+**Example:** Customer deposits 50M, balance = -40M → overdraft cleared
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant AM as Account Management
+    participant LED as Ledger
+    participant CR as Credit Service
+    
+    C->>AM: Deposit 50M (balance = -40M)
+    
+    Note over AM,LED: Phase 1: Execute Transaction
+    
+    AM->>LED: BEGIN TRANSACTION
+    LED->>LED: Credit 50M to account
+    LED->>LED: Balance: -40M + 50M = +10M
+    LED->>LED: Update overdraft.used = 0
+    LED->>LED: Update overdraft.available = 50M
+    LED->>AM: COMMIT TRANSACTION
+    
+    Note over AM,CR: Phase 2: Sync to Credit Service
+    
+    AM->>CR: POST /api/v1/credit/overdraft/sync-balance
+    Note over AM,CR: Body: {<br/>  facilityId: "OD123",<br/>  overdraftUsed: 0,<br/>  currentBalance: 10_000_000<br/>}
+    
+    CR->>CR: Update utilizationAmount = 0
+    CR->>CR: Update utilizationPercentage = 0%
+    CR->>CR: Create event: OVERDRAFT_CLEARED
+    CR->>CR: Stop interest accrual
+    
+    CR-->>AM: 200 OK
+    AM-->>C: Deposit successful (Overdraft cleared)
+```
+
+---
+
+#### Scenario C: Interest Charge Increases Overdraft
+
+**Example:** Monthly interest charge 600K → overdraft increases
+
+```mermaid
+sequenceDiagram
+    participant CR as Credit Service
+    participant LED as Ledger
+    participant AM as Account Management
+    participant DB_AM as Account DB
+    participant DB_CR as Credit DB
+    
+    Note over CR: EOD Job: Monthly Interest Charge
+    
+    CR->>CR: Calculate monthly interest = 600K
+    
+    Note over CR,LED: Phase 1: Charge Interest (Credit Service initiates)
+    
+    CR->>LED: POST /api/v1/ledger/transactions
+    Note over CR,LED: Body: {<br/>  accountId: "ACC001",<br/>  type: "DEBIT",<br/>  amount: 600_000,<br/>  description: "Overdraft interest",<br/>  reference: "INT-OD123-2025-01"<br/>}
+    
+    LED->>LED: BEGIN TRANSACTION
+    LED->>LED: Debit 600K from account
+    LED->>LED: Balance: -40M - 600K = -40.6M
+    LED->>DB_AM: Update account balance = -40.6M
+    LED->>DB_AM: Update overdraft.used = 40.6M
+    LED->>DB_AM: Update overdraft.available = 50M - 40.6M = 9.4M
+    LED->>LED: COMMIT TRANSACTION
+    
+    LED-->>CR: Transaction completed
+    
+    Note over CR,AM: Phase 2: Sync back to Credit Service
+    
+    AM->>CR: POST /api/v1/credit/overdraft/sync-balance
+    Note over AM,CR: Body: {<br/>  facilityId: "OD123",<br/>  overdraftUsed: 40_600_000,<br/>  currentBalance: -40_600_000<br/>}
+    
+    CR->>DB_CR: Update facility.utilizationAmount = 40.6M
+    CR->>DB_CR: Update facility.totalInterestCharged += 600K
+    
+    CR-->>AM: 200 OK
+```
+
+**Code Implementation:**
+
+```typescript
+// Credit Service - Monthly interest charge
+async function chargeMonthlyOverdraftInterest(): Promise<void> {
+  const facilities = await getActiveOverdraftFacilities({
+    status: 'ACTIVE',
+    utilizationAmount: { $gt: 0 }
+  });
+  
+  for (const facility of facilities) {
+    try {
+      // Get accumulated interest for the month
+      const monthlyInterest = await getAccruedInterest({
+        facilityId: facility.facilityId,
+        period: 'THIS_MONTH'
+      });
+      
+      if (monthlyInterest <= 0) continue;
+      
+      // Charge interest via Ledger
+      const txnResult = await ledgerAPI.createTransaction({
+        accountId: facility.accountId,
+        type: 'DEBIT',
+        amount: monthlyInterest,
+        description: 'Overdraft interest charge',
+        reference: `INT-${facility.facilityId}-${getMonthKey()}`,
+        category: 'INTEREST_EXPENSE'
+      });
+      
+      // Update facility (add interest to principal outstanding)
+      await updateFacility(facility.facilityId, {
+        totalInterestCharged: facility.totalInterestCharged + monthlyInterest
+      });
+      
+      // IMPORTANT: Account Management will auto-sync balance back
+      // Wait for sync (with timeout)
+      await waitForBalanceSync(facility.facilityId, 5000); // 5 seconds timeout
+      
+      // Verify sync
+      const updatedFacility = await getFacility(facility.facilityId);
+      console.log(`Interest charged: ${monthlyInterest}, New outstanding: ${updatedFacility.utilizationAmount}`);
+      
+      // Send notification
+      await sendNotification({
+        customerId: facility.cifNumber,
+        type: 'OVERDRAFT_INTEREST_CHARGED',
+        data: {
+          amount: monthlyInterest,
+          period: getMonthKey(),
+          rate: facility.interestRate,
+          newOutstanding: updatedFacility.utilizationAmount
+        }
+      });
+      
+    } catch (error) {
+      console.error(`Failed to charge interest for ${facility.facilityId}:`, error);
+    }
+  }
+}
+
+// Wait for balance sync (with timeout)
+async function waitForBalanceSync(
+  facilityId: string, 
+  timeoutMs: number
+): Promise<void> {
+  const startTime = Date.now();
+  const initialFacility = await getFacility(facilityId);
+  
+  while (Date.now() - startTime < timeoutMs) {
+    const facility = await getFacility(facilityId);
+    
+    // Check if lastBalanceSyncAt is newer than start time
+    if (facility.lastBalanceSyncAt > initialFacility.lastBalanceSyncAt) {
+      return; // Sync completed
+    }
+    
+    // Wait 100ms before retry
+    await sleep(100);
+  }
+  
+  // Timeout - log warning but don't fail
+  console.warn(`Balance sync timeout for facility ${facilityId}`);
+}
+```
+
+---
+
+#### Scenario D: Reconciliation (Đối soát Định kỳ)
+
+**Purpose:** Đảm bảo dữ liệu giữa Account Management và Credit Service luôn đồng bộ.
+
+**Frequency:** Hourly hoặc End of Day (EOD)
+
+```typescript
+// Credit Service - Reconciliation Job
+async function reconcileOverdraftBalances(): Promise<void> {
+  console.log('Starting overdraft balance reconciliation...');
+  
+  const facilities = await getActiveOverdraftFacilities();
+  let discrepancies = 0;
+  
+  for (const facility of facilities) {
+    try {
+      // Get balance from Account Management (MASTER)
+      const account = await accountManagementAPI.getAccount(facility.accountId);
+      
+      // Compare with Credit Service data
+      if (account.overdraft.used !== facility.utilizationAmount) {
+        discrepancies++;
+        
+        console.warn(`Discrepancy found for facility ${facility.facilityId}:`);
+        console.warn(`  Account Management: ${account.overdraft.used}`);
+        console.warn(`  Credit Service: ${facility.utilizationAmount}`);
+        
+        // Account Management is MASTER - sync from there
+        await updateFacility(facility.facilityId, {
+          utilizationAmount: account.overdraft.used,
+          availableLimit: account.overdraft.available,
+          utilizationPercentage: (account.overdraft.used / facility.currentLimit) * 100,
+          lastBalanceSyncAt: new Date()
+        });
+        
+        // Create reconciliation log
+        await createReconciliationLog({
+          facilityId: facility.facilityId,
+          accountId: facility.accountId,
+          discrepancyType: 'BALANCE_MISMATCH',
+          expectedValue: account.overdraft.used,
+          actualValue: facility.utilizationAmount,
+          difference: Math.abs(account.overdraft.used - facility.utilizationAmount),
+          resolvedBy: 'SYNC_FROM_ACCOUNT_MANAGEMENT',
+          timestamp: new Date()
+        });
+        
+        console.log(`  ✓ Synced from Account Management`);
+      }
+      
+    } catch (error) {
+      console.error(`Failed to reconcile facility ${facility.facilityId}:`, error);
+    }
+  }
+  
+  console.log(`Reconciliation completed. Discrepancies found: ${discrepancies}`);
+}
+
+// Run reconciliation hourly
+cron.schedule('0 * * * *', async () => {
+  await reconcileOverdraftBalances();
+});
+```
+
+---
+
+#### Scenario E: Failed Sync & Retry Mechanism
+
+**Problem:** Sync request to Credit Service fails (network issue, timeout, service down)
+
+**Solution:** Retry queue với exponential backoff
+
+```typescript
+// Account Management - Retry Queue
+interface BalanceSyncRetry {
+  retryId: string;
+  accountId: string;
+  facilityId: string;
+  attemptCount: number;
+  maxAttempts: number;
+  nextRetryAt: Date;
+  lastError?: string;
+  createdAt: Date;
+}
+
+// Queue for retry
+async function queueBalanceSyncRetry(accountId: string): Promise<void> {
+  const account = await getAccount(accountId);
+  
+  await db('balance_sync_retries').insert({
+    retryId: generateRetryId(),
+    accountId: accountId,
+    facilityId: account.overdraft.facilityId,
+    attemptCount: 0,
+    maxAttempts: 5,
+    nextRetryAt: new Date(Date.now() + 1000), // Retry in 1 second
+    createdAt: new Date()
+  });
+}
+
+// Retry worker (background job)
+async function processBalanceSyncRetries(): Promise<void> {
+  const retries = await db('balance_sync_retries')
+    .where('nextRetryAt', '<=', new Date())
+    .where('attemptCount', '<', db.raw('maxAttempts'))
+    .limit(100);
+  
+  for (const retry of retries) {
+    try {
+      // Attempt sync
+      await syncBalanceToCreditService(retry.accountId);
+      
+      // Success - remove from queue
+      await db('balance_sync_retries')
+        .where('retryId', retry.retryId)
+        .delete();
+      
+      console.log(`✓ Balance sync retry successful for account ${retry.accountId}`);
+      
+    } catch (error) {
+      // Failed - increment attempt and schedule next retry
+      const attemptCount = retry.attemptCount + 1;
+      const backoffSeconds = Math.pow(2, attemptCount); // Exponential backoff: 2, 4, 8, 16, 32 seconds
+      
+      await db('balance_sync_retries')
+        .where('retryId', retry.retryId)
+        .update({
+          attemptCount: attemptCount,
+          nextRetryAt: new Date(Date.now() + backoffSeconds * 1000),
+          lastError: error.message
+        });
+      
+      console.error(`✗ Balance sync retry ${attemptCount}/${retry.maxAttempts} failed for account ${retry.accountId}: ${error.message}`);
+      
+      // Max attempts reached - alert
+      if (attemptCount >= retry.maxAttempts) {
+        await createAlert({
+          type: 'BALANCE_SYNC_FAILED',
+          severity: 'CRITICAL',
+          accountId: retry.accountId,
+          facilityId: retry.facilityId,
+          message: `Failed to sync balance after ${attemptCount} attempts`,
+          requiresManualIntervention: true
+        });
+      }
+    }
+  }
+}
+
+// Run retry worker every 10 seconds
+setInterval(processBalanceSyncRetries, 10000);
+```
+
+---
+
+### Summary: Balance Sync Patterns
+
+| Trigger | Who Initiates | Direction | Timing | Critical? |
+|---------|--------------|-----------|--------|-----------|
+| **Debit Transaction** | Account Management | AM → CR | Async (after commit) | ⚠️ High |
+| **Credit Transaction** | Account Management | AM → CR | Async (after commit) | ⚠️ High |
+| **Interest Charge** | Credit Service | CR → Ledger → AM → CR | Sync (EOD job) | ⚠️ High |
+| **Reconciliation** | Credit Service | CR ← AM (query) | Scheduled (hourly) | ⚠️ Medium |
+| **Retry** | Account Management | AM → CR | Background (queue) | ⚠️ High |
+
+**Key Principles:**
+
+1. **Account Management = MASTER** for current balance
+2. **Credit Service = MONITOR** for risk & interest calculation
+3. **Always sync async** (don't block customer transaction)
+4. **Retry on failure** (with exponential backoff)
+5. **Reconcile regularly** (hourly or EOD)
+6. **Alert on persistent failure** (manual intervention)
+
 ---
 
 ## API Contracts
@@ -581,6 +1188,18 @@ GET /api/v1/credit/overdraft/{facilityId}/utilization
 
 // 7. Get interest accruals
 GET /api/v1/credit/overdraft/{facilityId}/interest
+
+// ⚠️ NEW: 8. Sync overdraft balance (called by Account Management)
+POST /api/v1/credit/overdraft/sync-balance
+Body: { 
+  facilityId, 
+  accountId, 
+  currentBalance,      // Account balance (can be negative)
+  overdraftUsed,       // Absolute overdraft usage
+  overdraftAvailable,  // Remaining limit
+  transactionId?,      // Optional transaction reference
+  timestamp 
+}
 ```
 
 ### Account Management APIs (Execute & Report)
@@ -601,9 +1220,10 @@ Body: { facilityId }
 // 4. Get overdraft status
 GET /api/v1/accounts/{accountId}/overdraft
 
-// 5. Report overdraft usage (internal, called by Account Management → Credit Service)
-POST /api/v1/credit/overdraft/report-usage
-Body: { facilityId, accountId, amountUsed, utilizationPercentage }
+// ❌ DEPRECATED: 5. Report overdraft usage
+// Replaced by: POST /api/v1/credit/overdraft/sync-balance (more comprehensive)
+// POST /api/v1/credit/overdraft/report-usage
+// Body: { facilityId, accountId, amountUsed, utilizationPercentage }
 ```
 
 ---
@@ -638,10 +1258,13 @@ CREATE TABLE overdraft_facilities (
     review_date DATE,
     status VARCHAR(20) NOT NULL,
     
-    -- Monitoring
+    -- Monitoring (synced from Account Management)
+    utilization_amount DECIMAL(18,2) DEFAULT 0,      -- ⚠️ NEW: Actual overdraft used
+    available_limit DECIMAL(18,2) DEFAULT 0,         -- ⚠️ NEW: Remaining limit
     utilization_percentage DECIMAL(5,2) DEFAULT 0,
     last_used_date DATE,
     last_interest_accrual_date DATE,
+    last_balance_sync_at TIMESTAMP,                  -- ⚠️ NEW: Last sync from Account Mgmt
     
     -- Audit
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -673,6 +1296,53 @@ CREATE TABLE overdraft_interest_accruals (
     INDEX idx_date (accrual_date),
     FOREIGN KEY (facility_id) REFERENCES overdraft_facilities(facility_id)
 );
+
+-- ⚠️ NEW: Balance Snapshots (Audit Trail)
+CREATE TABLE balance_snapshots (
+    snapshot_id VARCHAR(50) PRIMARY KEY,
+    facility_id VARCHAR(50) NOT NULL,
+    account_id VARCHAR(50) NOT NULL,
+    
+    -- Balance data
+    account_balance DECIMAL(18,2) NOT NULL,       -- Account balance (can be negative)
+    overdraft_used DECIMAL(18,2) NOT NULL,        -- Overdraft usage
+    overdraft_available DECIMAL(18,2) NOT NULL,   -- Remaining limit
+    utilization_percentage DECIMAL(5,2) NOT NULL,
+    
+    -- Context
+    transaction_id VARCHAR(50),                   -- Optional transaction reference
+    event_type VARCHAR(50),                       -- TRANSACTION, INTEREST_CHARGE, REPAYMENT, etc.
+    timestamp TIMESTAMP NOT NULL,
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_facility (facility_id),
+    INDEX idx_account (account_id),
+    INDEX idx_timestamp (timestamp),
+    FOREIGN KEY (facility_id) REFERENCES overdraft_facilities(facility_id)
+);
+
+-- ⚠️ NEW: Reconciliation Logs
+CREATE TABLE reconciliation_logs (
+    log_id VARCHAR(50) PRIMARY KEY,
+    facility_id VARCHAR(50) NOT NULL,
+    account_id VARCHAR(50) NOT NULL,
+    
+    discrepancy_type VARCHAR(50) NOT NULL,        -- BALANCE_MISMATCH, LIMIT_MISMATCH, etc.
+    expected_value DECIMAL(18,2) NOT NULL,        -- From Account Management (master)
+    actual_value DECIMAL(18,2) NOT NULL,          -- From Credit Service
+    difference DECIMAL(18,2) NOT NULL,            -- Absolute difference
+    
+    resolved_by VARCHAR(50) NOT NULL,             -- SYNC_FROM_ACCOUNT_MANAGEMENT, MANUAL, etc.
+    resolution_notes TEXT,
+    
+    timestamp TIMESTAMP NOT NULL,
+    
+    INDEX idx_facility (facility_id),
+    INDEX idx_type (discrepancy_type),
+    INDEX idx_timestamp (timestamp),
+    FOREIGN KEY (facility_id) REFERENCES overdraft_facilities(facility_id)
+);
 ```
 
 ### Account Management Database
@@ -688,6 +1358,24 @@ ALTER TABLE accounts ADD COLUMN overdraft_last_synced_at TIMESTAMP;
 
 -- Index
 CREATE INDEX idx_overdraft_facility ON accounts(overdraft_facility_id);
+
+-- ⚠️ NEW: Balance Sync Retry Queue
+CREATE TABLE balance_sync_retries (
+    retry_id VARCHAR(50) PRIMARY KEY,
+    account_id VARCHAR(50) NOT NULL,
+    facility_id VARCHAR(50) NOT NULL,
+    
+    attempt_count INT DEFAULT 0,
+    max_attempts INT DEFAULT 5,
+    next_retry_at TIMESTAMP NOT NULL,
+    last_error TEXT,
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_account (account_id),
+    INDEX idx_next_retry (next_retry_at),
+    INDEX idx_attempts (attempt_count, max_attempts)
+);
 ```
 
 ---
